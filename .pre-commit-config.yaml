@@ -1,0 +1,34 @@
+exclude: (migrations/|static/(jquery.*|main.css))
+repos:
+- repo: https://github.com/psf/black
+  rev: 19.10b0
+  hooks:
+    - id: black
+      name: black
+- repo: https://gitlab.com/pycqa/flake8
+  rev: 3.7.9
+  hooks:
+    - id: flake8
+- repo: local
+  hooks:
+    - id: prettier
+      name: prettier
+      entry: ./node_modules/.bin/prettier
+      language: node
+      stages: [commit]
+      files: (.*)\.(js|css)$
+      args: ["--write"]
+    - id: eslint
+      name: eslint
+      entry: ./node_modules/.bin/eslint
+      language: node
+      stages: [commit]
+      files: (.*)\.(jsx?|tsx?)$
+      args: ["--fix", "--quiet"]
+- repo: https://github.com/pre-commit/pre-commit-hooks
+  rev: v2.4.0
+  hooks:
+    - id: double-quote-string-fixer
+    - id: end-of-file-fixer
+    - id: mixed-line-ending
+      args: ["--fix=lf"]

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-from __future__ import unicode_literals
+
 
 from django.db import migrations, models
 import django.core.management
@@ -25,7 +25,7 @@ def migrate_to_country_code(apps, schema_editor):
             if not foundCountry.exists():
                 foundCountry = Country.objects.filter(alpha3=d.migrateaddresscountry)
             if not foundCountry.exists():
-                if util.try_parse_int(d.migrateaddresscountry) != None:
+                if util.try_parse_int(d.migrateaddresscountry) is not None:
                     foundCountry = Country.objects.filter(
                         numeric=d.migrateaddresscountry)
         # As a last resort, search through this user's most recent IPN for
@@ -66,13 +66,13 @@ class Migration(migrations.Migration):
                 ('id', models.AutoField(verbose_name='ID',
                                         serialize=False, auto_created=True, primary_key=True)),
                 ('name', models.CharField(
-                    help_text=b'Official ISO 3166 name for the country', unique=True, max_length=64)),
-                ('alpha2', models.CharField(help_text=b'ISO 3166-1 Two-letter code', unique=True, max_length=2, validators=[
-                 django.core.validators.RegexValidator(regex=b'^[A-Z]{2}$', message=b'Country Alpha-2 code must be exactly 2 uppercase alphabetic characters')])),
-                ('alpha3', models.CharField(help_text=b'ISO 3166-1 Three-letter code', unique=True, max_length=3, validators=[
-                 django.core.validators.RegexValidator(regex=b'^[A-Z]{3}$', message=b'Country Alpha-3 code must be exactly 3 uppercase alphabetic characters')])),
-                ('numeric', models.CharField(help_text=b'ISO 3166-1 numeric code', blank=True, null=True, unique=True, max_length=3,
-                                             validators=[django.core.validators.RegexValidator(regex=b'^\\\\d{3}$', message=b'Country Numeric code must be exactly 3 digits')])),
+                    help_text='Official ISO 3166 name for the country', unique=True, max_length=64)),
+                ('alpha2', models.CharField(help_text='ISO 3166-1 Two-letter code', unique=True, max_length=2, validators=[
+                 django.core.validators.RegexValidator(regex='^[A-Z]{2}$', message='Country Alpha-2 code must be exactly 2 uppercase alphabetic characters')])),
+                ('alpha3', models.CharField(help_text='ISO 3166-1 Three-letter code', unique=True, max_length=3, validators=[
+                 django.core.validators.RegexValidator(regex='^[A-Z]{3}$', message='Country Alpha-3 code must be exactly 3 uppercase alphabetic characters')])),
+                ('numeric', models.CharField(help_text='ISO 3166-1 numeric code', blank=True, null=True, unique=True, max_length=3,
+                                             validators=[django.core.validators.RegexValidator(regex='^\\\\d{3}$', message='Country Numeric code must be exactly 3 digits')])),
             ],
             options={
                 'ordering': ('alpha2',),

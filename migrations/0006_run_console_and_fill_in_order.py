@@ -1,10 +1,9 @@
 # -*- coding: utf-8 -*-
-from __future__ import unicode_literals
+
 
 from django.db import migrations, models
-import django.db.models.deletion
-from django.conf import settings
 import tracker.models.event
+
 
 def fill_in_order_column(apps, schema_editor):
     SpeedRun = apps.get_model('tracker', 'SpeedRun')
@@ -14,9 +13,11 @@ def fill_in_order_column(apps, schema_editor):
         run.order = prev_order + 1
         run.save()
 
+
 def clear_order_column(apps, schema_editor):
     SpeedRun = apps.get_model('tracker', 'SpeedRun')
     SpeedRun.objects.update(order=None)
+
 
 class Migration(migrations.Migration):
 
@@ -33,7 +34,7 @@ class Migration(migrations.Migration):
         migrations.AlterField(
             model_name='speedrun',
             name='deprecated_runners',
-            field=models.CharField(blank=True, verbose_name=b'*DEPRECATED* Runners', max_length=1024, editable=False, validators=[tracker.models.event.runners_exists]),
+            field=models.CharField(blank=True, verbose_name='*DEPRECATED* Runners', max_length=1024, editable=False, validators=[tracker.models.event.runners_exists]),
         ),
         migrations.AlterField(
             model_name='speedrun',

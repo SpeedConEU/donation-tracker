@@ -1,67 +1,101 @@
+import fetchMock from 'fetch-mock';
+import thunk from 'redux-thunk';
+import configureMockStore from 'redux-mock-store';
+
 import singletons from './singletons';
-import $ from 'jquery';
+
+const mockStore = configureMockStore([thunk]);
+
+const expectActions = (store, creator, expected = []) => {
+  store.dispatch(creator).then(() => {
+    expect(store.getActions()).toEqual(expected);
+  });
+};
 
 describe('singletons actions', () => {
-    let dispatchSpy;
-    let action;
+  let action;
+  let store;
 
+  beforeEach(() => {
+    window.API_ROOT = 'http://localhost:55555/';
+    fetchMock.restore();
+  });
+
+  describe('#fetchMe', () => {
     beforeEach(() => {
-        dispatchSpy = jasmine.createSpy('dispatch');
-        window.API_ROOT = 'http://localhost:55555/';
+      action = singletons.fetchMe();
+      store = mockStore();
     });
 
-    describe('#fetchMe', () => {
+    it('returns a thunk', () => {
+      expect(action).toEqual(jasmine.any(Function));
+    });
+
+    describe('when the thunk is called', () => {
+      beforeEach(() => {
+        fetchMock.restore().getOnce(`${API_ROOT}me`, {
+          body: { todos: ['do something'] },
+          headers: { 'content-type': 'application/json' },
+        });
+      });
+
+      it('dispatches a loading action for "me"', () => {
+        store.dispatch(action).then(() => {
+          expect(store.getActions()).toContain(
+            jasmine.objectContaining({ type: 'MODEL_STATUS_LOADING', model: { type: 'me' } }),
+          );
+        });
+      });
+
+      it('sends a request to the ME endpoint', () => {
+        store.dispatch(action).then(() => {
+          expect(fetchMock.done());
+        });
+      });
+
+      describe('when the call succeeds', () => {
+        const ME_DATA = { username: 'jazzaboo' };
         beforeEach(() => {
-            action = singletons.fetchMe();
+          fetchMock.restore().getOnce(`${API_ROOT}me`, {
+            body: ME_DATA,
+            headers: { 'content-type': 'application/json' },
+          });
         });
 
-        it('returns a thunk', () => {
-            expect(action).toEqual(jasmine.any(Function));
+        it('dispatches a model success for "me"', () => {
+          store.dispatch(action).then(() => {
+            expect(store.getActions()).toContain(
+              jasmine.objectContaining({ type: 'MODEL_STATUS_SUCCESS', model: { type: 'me' } }),
+            );
+          });
         });
 
-        describe('when the thunk is called', () => {
-            let d;
-            beforeEach(() => {
-                d = $.Deferred();
-                spyOn($, 'ajax').and.returnValue(d.promise());
-                action(dispatchSpy);
-            });
-
-            it('dispatches a loading action for "me"', () => {
-                expect(dispatchSpy).toHaveBeenCalledWith(jasmine.objectContaining({type: 'MODEL_STATUS_LOADING', model: { type: 'me'}}));
-            });
-
-            it('sends a request to the ME endpoint', () => {
-                expect($.ajax).toHaveBeenCalledWith(jasmine.objectContaining({url: `${API_ROOT}me`}));
-            });
-
-            describe('when the call succeeds', () => {
-                beforeEach(() => {
-                    d.resolve({username: 'jazzaboo'});
-                });
-
-                it('dispatches a load complete action for "me"', () => {
-                    expect(dispatchSpy).toHaveBeenCalledWith(jasmine.objectContaining({type: 'MODEL_STATUS_SUCCESS', model: { type: 'me'}}));
-                });
-
-                it('dispatches a LOAD_ME action with the returned user', () => {
-                    expect(dispatchSpy).toHaveBeenCalledWith(jasmine.objectContaining({type: 'LOAD_ME', me: {username: 'jazzaboo'}}));
-                });
-            });
-
-            describe('when the call succeeds', () => {
-                beforeEach(() => {
-                    d.reject();
-                });
-
-                it('dispatches a load error action for "me"', () => {
-                    expect(dispatchSpy).toHaveBeenCalledWith(jasmine.objectContaining({type: 'MODEL_STATUS_ERROR', model: { type: 'me'}}));
-                });
-
-                it('dispatches a LOAD_ME action with an anonymous user', () => {
-                    expect(dispatchSpy).toHaveBeenCalledWith(jasmine.objectContaining({type: 'LOAD_ME', me: {}}));
-                });
-            });
+        it('dispatches a LOAD_ME for "me"', () => {
+          store.dispatch(action).then(() => {
+            expect(store.getActions()).toContain(jasmine.objectContaining({ type: 'LOAD_ME', me: ME_DATA }));
+          });
         });
+      });
+
+      describe('when the call fails', () => {
+        beforeEach(() => {
+          fetchMock.restore().getOnce(`${API_ROOT}me`, new Promise((res, reject) => reject()));
+        });
+
+        it('dispatches a model error for "me"', () => {
+          store.dispatch(action).then(() => {
+            expect(store.getActions()).toContain(
+              jasmine.objectContaining({ type: 'MODEL_STATUS_ERROR', model: { type: 'me' } }),
+            );
+          });
+        });
+
+        it('dispatches a blank LOAD_ME for an anonymous user', () => {
+          store.dispatch(action).then(() => {
+            expect(store.getActions()).toContain(jasmine.objectContaining({ type: 'LOAD_ME', me: {} }));
+          });
+        });
+      });
     });
+  });
 });
