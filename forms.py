@@ -106,12 +106,12 @@ class DonationEntryForm(forms.Form):
         )
         self.fields['comment'] = forms.CharField(widget=forms.Textarea, required=False)
         self.fields['requestedvisibility'] = forms.ChoiceField(
-            initial='CURR',
+            initial='ALIAS',
             choices=models.Donation._meta.get_field('requestedvisibility').choices,
             label='Name Visibility',
         )
         self.fields['requestedalias'] = forms.CharField(
-            max_length=32, label='Preferred Alias', required=False
+            max_length=32, label='Username', required=False
         )
         self.fields['requestedemail'] = forms.EmailField(
             max_length=128, label='Preferred Email', required=False
@@ -128,7 +128,7 @@ class DonationEntryForm(forms.Form):
             and not self.cleaned_data['requestedalias']
         ):
             raise forms.ValidationError(
-                _("Must specify an alias with 'ALIAS' visibility")
+                _("Must specify a username with 'Username' visibility")
             )
         if (
             self.cleaned_data['requestedalias']

@@ -24,9 +24,9 @@ __all__ = [
 _currencyChoices = (('USD', 'US Dollars'), ('CAD', 'Canadian Dollars'))
 
 DonorVisibilityChoices = (
-    ('FULL', 'Fully Visible'),
+    ('CURR', 'Use Existing (Anonymous if not set)'),
     ('FIRST', 'First Name, Last Initial'),
-    ('ALIAS', 'Alias Only'),
+    ('FULL', 'Full Name'),
     ('ANON', 'Anonymous'),
 )
 
@@ -135,8 +135,8 @@ class Donation(models.Model):
         max_length=32,
         null=False,
         blank=False,
-        default='CURR',
-        choices=(('CURR', 'Use Existing (Anonymous if not set)'),)
+        default='ALIAS',
+        choices=(('ALIAS', 'Username Only'),)
         + DonorVisibilityChoices,
         verbose_name='Requested Visibility',
     )
