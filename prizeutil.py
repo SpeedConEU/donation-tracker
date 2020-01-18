@@ -5,7 +5,7 @@ import random
 from django.db import transaction
 
 from . import util
-from .models import PrizeKey, PrizeWinner
+from tracker.models import PrizeKey, PrizeWinner
 from functools import reduce
 
 
@@ -103,7 +103,7 @@ def draw_keys(prize, seed=None, rand=None):
 
 
 def get_past_due_prize_winners(event):
-    now = datetime.datetime.utcnow().replace(tzinfo=pytz.utc)
+    now = datetime.datetime.utcnow().astimezone(pytz.utc)
     return PrizeWinner.objects.filter(acceptdeadline__lte=now, pendingcount__gte=1)
 
 

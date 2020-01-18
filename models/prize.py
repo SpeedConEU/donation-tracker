@@ -8,18 +8,18 @@ from django.core.exceptions import ValidationError
 from django.core.urlresolvers import reverse
 from django.db import models
 from django.db.models import Sum, Q
-from django.db.models.signals import post_save
+from django.db.models.signals import post_save, post_delete
 from django.dispatch import receiver
 
-import tracker.util as util
-from .event import LatestEvent, TimestampField
-from ..models import Event, Donation, SpeedRun
-from ..validators import positive, nonzero
+from tracker import util
+from tracker.models import Event, Donation, SpeedRun
+from tracker.validators import positive, nonzero
+from .fields import TimestampField
+from .util import LatestEvent
 
 __all__ = [
     'Prize',
     'PrizeKey',
-    'PrizeTicket',
     'PrizeWinner',
     'PrizeCategory',
     'DonorPrizeEntry',
@@ -66,7 +66,7 @@ class Prize(models.Model):
     minimumbid = models.DecimalField(
         decimal_places=2,
         max_digits=20,
-        default=Decimal('5.0'),
+        default=Decimal('5.00'),
         verbose_name='Minimum Bid',
         validators=[positive, nonzero],
     )
@@ -75,13 +75,12 @@ class Prize(models.Model):
         max_digits=20,
         null=True,
         blank=True,
-        default=Decimal('5.0'),
+        default=Decimal('5.00'),
         verbose_name='Maximum Bid',
         validators=[positive, nonzero],
     )
     sumdonations = models.BooleanField(default=False, verbose_name='Sum Donations')
     randomdraw = models.BooleanField(default=True, verbose_name='Random Draw')
-    ticketdraw = models.BooleanField(default=False, verbose_name='Ticket Draw')
     event = models.ForeignKey('Event', on_delete=models.PROTECT, default=LatestEvent)
     startrun = models.ForeignKey(
         'SpeedRun',
@@ -91,6 +90,15 @@ class Prize(models.Model):
         blank=True,
         verbose_name='Start Run',
     )
+    prev_run = models.ForeignKey(
+        'SpeedRun',
+        on_delete=models.SET_NULL,
+        related_name='+',
+        null=True,
+        blank=True,
+        serialize=False,
+        editable=False,
+    )
     endrun = models.ForeignKey(
         'SpeedRun',
         on_delete=models.PROTECT,
@@ -98,6 +106,15 @@ class Prize(models.Model):
         null=True,
         blank=True,
         verbose_name='End Run',
+    )
+    next_run = models.ForeignKey(
+        'SpeedRun',
+        on_delete=models.SET_NULL,
+        related_name='+',
+        null=True,
+        blank=True,
+        serialize=False,
+        editable=False,
     )
     starttime = models.DateTimeField(null=True, blank=True, verbose_name='Start Time')
     endtime = models.DateTimeField(null=True, blank=True, verbose_name='End Time')
@@ -189,6 +206,9 @@ class Prize(models.Model):
     def natural_key(self):
         return (self.name, self.event.natural_key())
 
+    def get_absolute_url(self):
+        return reverse('tracker:prize', args=(self.id,))
+
     def __str__(self):
         return str(self.name)
 
@@ -228,21 +248,30 @@ class Prize(models.Model):
             raise ValidationError(
                 {'starttime': 'Cannot have both Start/End Run and Start/End Time set'}
             )
-        if self.randomdraw:
-            if self.maximumbid is not None and self.maximumbid < self.minimumbid:
-                raise ValidationError(
-                    {'maximumbid': 'Maximum Bid cannot be lower than Minimum Bid'}
-                )
-            if not self.sumdonations and self.maximumbid != self.minimumbid:
-                raise ValidationError(
-                    {
-                        'maximumbid': 'Maximum Bid cannot differ from Minimum Bid if Sum Donations is not checked'
-                    }
-                )
         if self.image and self.imagefile:
             raise ValidationError(
                 {'image': 'Cannot have both an Image URL and an Image File'}
             )
+
+    def save(self, *args, **kwargs):
+        using = kwargs.get('using', None)
+        self.maximumbid = self.minimumbid
+        if self.startrun and self.startrun.order and self.endrun and self.endrun.order:
+            self.prev_run = (
+                SpeedRun.objects.using(using)
+                .filter(event=self.startrun.event_id, order__lt=self.startrun.order)
+                .order_by('order')
+                .last()
+            )
+            self.next_run = (
+                SpeedRun.objects.using(using)
+                .filter(event=self.endrun.event_id, order__gt=self.endrun.order)
+                .order_by('order')
+                .first()
+            )
+        else:
+            self.prev_run = self.next_run = None
+        super(Prize, self).save(*args, **kwargs)
 
     def eligible_donors(self):
         donationSet = Donation.objects.filter(
@@ -276,9 +305,7 @@ class Prize(models.Model):
 
         fullDonors = PrizeWinner.objects.filter(prize=self, sumcount=self.maxmultiwin)
         donationSet = donationSet.exclude(donor__in=[w.winner for w in fullDonors])
-        if self.ticketdraw:
-            donationSet = donationSet.filter(tickets__prize=self)
-        elif self.has_draw_time():
+        if self.has_draw_time():
             donationSet = donationSet.filter(
                 timereceived__gte=self.start_draw_time(),
                 timereceived__lte=self.end_draw_time(),
@@ -287,20 +314,11 @@ class Prize(models.Model):
         for donation in donationSet:
             if self.sumdonations:
                 donors.setdefault(donation.donor, Decimal('0.0'))
-                if self.ticketdraw:
-                    donors[donation.donor] += donation.prize_ticket_amount(self)
-                else:
-                    donors[donation.donor] += donation.amount
+                donors[donation.donor] += donation.amount
             else:
-                if self.ticketdraw:
-                    donors[donation.donor] = max(
-                        donation.prize_ticket_amount(self),
-                        donors.get(donation.donor, Decimal('0.0')),
-                    )
-                else:
-                    donors[donation.donor] = max(
-                        donation.amount, donors.get(donation.donor, Decimal('0.0'))
-                    )
+                donors[donation.donor] = max(
+                    donation.amount, donors.get(donation.donor, Decimal('0.0'))
+                )
         directEntries = DonorPrizeEntry.objects.filter(prize=self).exclude(
             donor__in=[w.winner for w in fullDonors]
         )
@@ -374,6 +392,7 @@ class Prize(models.Model):
 
     def games_range(self):
         if self.games_based_drawing():
+            # TODO: fix me to use order... is this even used at all outside of tests?
             return SpeedRun.objects.filter(
                 event=self.event,
                 starttime__gte=self.startrun.starttime,
@@ -386,17 +405,12 @@ class Prize(models.Model):
         return self.start_draw_time() and self.end_draw_time()
 
     def start_draw_time(self):
-        if self.startrun:
-            prev_run = (
-                SpeedRun.objects.filter(
-                    event=self.startrun.event_id, order__lt=self.startrun.order
-                )
-                .order_by('order')
-                .last()
-            )
-            if prev_run:
-                return prev_run.endtime - datetime.timedelta(
-                    milliseconds=TimestampField.time_string_to_int(prev_run.setup_time)
+        if self.startrun and self.startrun.order:
+            if self.prev_run:
+                return self.prev_run.endtime - datetime.timedelta(
+                    milliseconds=TimestampField.time_string_to_int(
+                        self.prev_run.setup_time
+                    )
                 )
             return self.startrun.starttime.replace(tzinfo=pytz.utc)
         elif self.starttime:
@@ -405,15 +419,8 @@ class Prize(models.Model):
             return None
 
     def end_draw_time(self):
-        if self.endrun:
-            next_run = (
-                SpeedRun.objects.filter(
-                    event=self.endrun.event_id, order__gt=self.endrun.order
-                )
-                .order_by('order')
-                .first()
-            )
-            if not next_run:
+        if self.endrun and self.endrun.order:
+            if not self.next_run:
                 # covers finale speeches
                 return self.endrun.endtime.replace(
                     tzinfo=pytz.utc
@@ -483,6 +490,45 @@ class Prize(models.Model):
             return None
 
 
+@receiver(post_save, sender=SpeedRun)
+def fix_prev_and_next_run_save(sender, instance, created, raw, using, **kwargs):
+    if raw:
+        return
+    fix_prev_and_next_run(instance, using)
+
+
+@receiver(post_delete, sender=SpeedRun)
+def fix_prev_and_next_run_delete(sender, instance, using, **kwargs):
+    fix_prev_and_next_run(instance, using)
+
+
+def fix_prev_and_next_run(instance, using):
+    prev_run = instance.order and (
+        SpeedRun.objects.filter(event=instance.event_id, order__lt=instance.order)
+        .using(using)
+        .order_by('order')
+        .last()
+    )
+    next_run = instance.order and (
+        SpeedRun.objects.filter(event=instance.event_id, order__gt=instance.order)
+        .using(using)
+        .order_by('order')
+        .first()
+    )
+    prizes = Prize.objects.using(using).filter(
+        Q(prev_run=instance)
+        | Q(next_run=instance)
+        | Q(startrun=instance)
+        | Q(endrun=instance)
+    )
+    if prev_run:
+        prizes = prizes | Prize.objects.using(using).filter(
+            Q(startrun=next_run) | Q(endrun=prev_run)
+        )
+    for prize in prizes:
+        prize.save(using=using)
+
+
 class PrizeKey(models.Model):
     prize = models.ForeignKey('Prize', on_delete=models.PROTECT)
     prize_winner = models.OneToOneField(
@@ -532,30 +578,6 @@ def set_max_winners(sender, instance, created, raw, **kwargs):
         changed = True
     if changed:
         prize.save()
-
-
-class PrizeTicket(models.Model):
-    prize = models.ForeignKey('Prize', on_delete=models.PROTECT, related_name='tickets')
-    donation = models.ForeignKey(
-        'Donation', on_delete=models.PROTECT, related_name='tickets'
-    )
-    amount = models.DecimalField(
-        decimal_places=2, max_digits=20, validators=[positive, nonzero]
-    )
-
-    class Meta:
-        app_label = 'tracker'
-        verbose_name = 'Prize Ticket'
-        ordering = ['-donation__timereceived']
-        unique_together = ('prize', 'donation')
-
-    def clean(self):
-        if not self.prize.ticketdraw:
-            raise ValidationError('Cannot assign tickets to non-ticket prize')
-        self.donation.clean(self)
-
-    def __str__(self):
-        return str(self.prize) + ' -- ' + str(self.donation)
 
 
 class PrizeWinner(models.Model):

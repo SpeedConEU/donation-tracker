@@ -175,9 +175,6 @@ def f0026_migrate_from_country_code(apps, schema_editor):
 
 
 class Migration(migrations.Migration):
-
-    replaces = [('tracker', '0001_initial'), ('tracker', '0002_add_external_submissions'), ('tracker', '0003_add_event_timezone'), ('tracker', '0004_blanks_and_nulls'), ('tracker', '0005_run_commentators'), ('tracker', '0006_run_console_and_fill_in_order'), ('tracker', '0007_remove_donor_runner_fields'), ('tracker', '0008_submission_console'), ('tracker', '0009_change_flowmodel_credentialsmodel_to_1to1_fields'), ('tracker', '0010_one_to_one_and_typo_fix'), ('tracker', '0011_add_speedrun_category_releaseyear'), ('tracker', '0012_speedrun_giantbomb_id'), ('tracker', '0013_prize_provider'), ('tracker', '0014_donor_user'), ('tracker', '0015_add_prizewinner_notes_prize_requiresshipping'), ('tracker', '0016_prizewinner_acceptemailsentcount'), ('tracker', '0017_make_donor_user_nullable'), ('tracker', '0018_prizewinner_courier_name'), ('tracker', '0019_event_prize_email_templates'), ('tracker', '0020_prize_reviewnotes'), ('tracker', '0021_add_prize_accept_deadline'), ('tracker', '0022_textfields_to_charfields'), ('tracker', '0023_add_display_name'), ('tracker', '0024_prize_handler'), ('tracker', '0025_event_minimumdonation'), ('tracker', '0026_create_country'), ('tracker', '0027_event_prize_countries'), ('tracker', '0028_add_country_region'), ('tracker', '0029_event_disallowed_prize_regions'), ('tracker', '0030_add_prize_country_filters'), ('tracker', '0031_event_prize_accept_deadline_delta'), ('tracker', '0032_prizewinner_auth_code'), ('tracker', '0033_prizewinner_shipping_receipt_url'), ('tracker', '0034_speedrun_coop'), ('tracker', '0034_add_tech_notes'), ('tracker', '0035_merge'), ('tracker', '0036_tech_notes_permissions'), ('tracker', '0037_add_email_fields'), ('tracker', '0038_add_donation_indices'), ('tracker', '0039_upgrade_to_19')]
-
     initial = True
 
     dependencies = [
@@ -673,6 +670,7 @@ class Migration(migrations.Migration):
         migrations.RunPython(
             code=f0006_fill_in_order_column,
             reverse_code=f0006_clear_order_column,
+            elidable=True,
         ),
         migrations.AddField(
             model_name='submission',
@@ -716,6 +714,7 @@ class Migration(migrations.Migration):
         ),
         migrations.RunPython(
             code=f0013_populate_prize_contributors,
+            elidable=True,
         ),
         migrations.RemoveField(
             model_name='prize',
@@ -817,6 +816,7 @@ class Migration(migrations.Migration):
         ),
         migrations.RunPython(
             code=f0023_copy_over_display_name,
+            elidable=True,
         ),
         migrations.AddField(
             model_name='prize',
@@ -830,6 +830,7 @@ class Migration(migrations.Migration):
         ),
         migrations.RunPython(
             code=f0024_write_existing_providers,
+            elidable=True,
         ),
         migrations.AddField(
             model_name='event',
@@ -852,6 +853,7 @@ class Migration(migrations.Migration):
         ),
         migrations.RunPython(
             code=f0026_add_countries,
+            elidable=True,
         ),
         migrations.RenameField(
             model_name='donor',
@@ -866,6 +868,7 @@ class Migration(migrations.Migration):
         migrations.RunPython(
             code=f0026_migrate_to_country_code,
             reverse_code=f0026_migrate_from_country_code,
+            elidable=True,
         ),
         migrations.RemoveField(
             model_name='donor',

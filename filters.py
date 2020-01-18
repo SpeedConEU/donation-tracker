@@ -16,7 +16,6 @@ from tracker.models import (
     Log,
     Prize,
     PrizeCategory,
-    PrizeTicket,
     PrizeWinner,
     Runner,
     SpeedRun,
@@ -35,7 +34,6 @@ _ModelMap = {
     'donorcache': DonorCache,
     'event': Event,
     'prize': Prize,
-    'prizeticket': PrizeTicket,
     'prizecategory': PrizeCategory,
     'prizewinner': PrizeWinner,
     'prizeentry': DonorPrizeEntry,
@@ -79,13 +77,12 @@ _GeneralFields = {
     'donor': ['email', 'alias', 'firstname', 'lastname', 'paypalemail'],
     'event': ['short', 'name'],
     'prize': ['name', 'description', 'shortdescription', 'prizewinner', 'provider'],
-    'prizeticket': ['prize', 'donation',],
     'prizecategory': ['name',],
     'prizewinner': ['prize', 'winner'],
     'prizeentry': ['prize', 'donor'],
-    'run': ['name', 'description',],
+    'run': ['name', 'description'],
     'log': ['category', 'message', 'event'],
-    'runner': ['name', 'stream', 'twitter', 'youtube',],
+    'runner': ['name', 'stream', 'twitter', 'youtube', 'platform', 'pronouns'],
 }
 
 _SpecificFields = {
@@ -247,23 +244,10 @@ _SpecificFields = {
         'shortdescription': 'shortdescription__icontains',
         'sumdonations': 'sumdonations',
         'randomdraw': 'randomdraw',
-        'ticketdraw': 'ticketdraw',
         'state': 'state',
         'provider': 'provider__icontains',
         'handler': 'handler',
         'creator': 'creator',
-    },
-    'prizeticket': {
-        'event': 'donation__event',
-        'eventname': 'donation__event__name__icontains',
-        'eventshort': 'donation__event__short__iexact',
-        'prizename': 'prize__name__icontains',
-        'prize': 'prize',
-        'donation': 'donation',
-        'donor': 'donation__donor',
-        'amount': 'amount',
-        'amount_lte': 'amount__lte',
-        'amount_gte': 'amount__gte',
     },
     'prizewinner': {
         'event': 'prize__event',
@@ -313,10 +297,11 @@ _SpecificFields = {
         'timestamp_gte': 'timestamp__gte',
     },
     'runner': {
-        'name': 'name',
+        'name': 'name__iexact',
         'stream': 'stream',
         'twitter': 'twitter',
         'youtube': 'youtube',
+        'event': 'speedrun__event',
     },
 }
 
@@ -496,7 +481,7 @@ def default_time(time):
         time = datetime.utcnow()
     elif isinstance(time, str):
         time = dateutil.parser.parse(time)
-    return time.replace(tzinfo=pytz.utc)
+    return time.astimezone(pytz.utc)
 
 
 _DEFAULT_DONATION_DELTA = timedelta(hours=3)
@@ -680,7 +665,7 @@ def run_model_query(model, params={}, user=None, mode='user'):
     if 'feed' in params:
         filtered = apply_feed_filter(filtered, model, params['feed'], params, user=user)
 
-    return filtered
+    return filtered.distinct()
 
 
 def user_restriction_filter(model):
@@ -704,8 +689,8 @@ def apply_feed_filter(query, model, feedName, params, user=None, noslice=False):
             callParams = {'donations': query}
             if 'delta' in params:
                 callParams['delta'] = timedelta(minutes=int(params['delta']))
-            if 'offset' in params:
-                callParams['queryOffset'] = default_time(params['offset'])
+            if 'time' in params:
+                callParams['queryOffset'] = default_time(params['time'])
             if 'maxDonations' in params:
                 callParams['maxDonations'] = int(params['maxDonations'])
             if 'minDonations' in params:
@@ -741,8 +726,8 @@ def apply_feed_filter(query, model, feedName, params, user=None, noslice=False):
             if noslice:
                 callParams['maxRuns'] = None
                 callParams['minRuns'] = None
-            if 'offset' in params:
-                callParams['queryOffset'] = default_time(params['offset'])
+            if 'time' in params:
+                callParams['queryOffset'] = default_time(params['time'])
             query = query.filter(state='OPENED').filter(
                 upcomming_bid_filter(**callParams)
             )
@@ -757,8 +742,8 @@ def apply_feed_filter(query, model, feedName, params, user=None, noslice=False):
                 callParams['minRuns'] = None
             if 'delta' in params:
                 callParams['delta'] = timedelta(minutes=int(params['delta']))
-            if 'offset' in params:
-                callParams['queryOffset'] = default_time(params['offset'])
+            if 'time' in params:
+                callParams['queryOffset'] = default_time(params['time'])
             query = query.filter(future_bid_filter(**callParams))
         elif feedName == 'completed':
             query = get_completed_bids(query)
@@ -774,8 +759,8 @@ def apply_feed_filter(query, model, feedName, params, user=None, noslice=False):
             if noslice:
                 callParams['maxRuns'] = None
                 callParams['minRuns'] = None
-            if 'offset' in params:
-                callParams['queryOffset'] = default_time(params['offset'])
+            if 'time' in params:
+                callParams['queryOffset'] = default_time(params['time'])
             query = get_upcomming_runs(**callParams)
         elif feedName == 'future':
             if 'maxRuns' in params:
@@ -787,14 +772,14 @@ def apply_feed_filter(query, model, feedName, params, user=None, noslice=False):
                 callParams['minRuns'] = None
             if 'delta' in params:
                 callParams['delta'] = timedelta(minutes=int(params['delta']))
-            if 'offset' in params:
-                callParams['queryOffset'] = default_time(params['offset'])
+            if 'time' in params:
+                callParams['queryOffset'] = default_time(params['time'])
             query = get_future_runs(**callParams)
     elif model == 'prize':
         if feedName == 'current':
             callParams = {}
-            if 'offset' in params:
-                callParams['queryOffset'] = default_time(params['offset'])
+            if 'time' in params:
+                callParams['queryOffset'] = default_time(params['time'])
             query = query.filter(current_prizes_filter(**callParams))
         elif feedName == 'future':
             callParams = {}
@@ -807,8 +792,8 @@ def apply_feed_filter(query, model, feedName, params, user=None, noslice=False):
                 callParams['minRuns'] = None
             if 'delta' in params:
                 callParams['delta'] = timedelta(minutes=int(params['delta']))
-            if 'offset' in params:
-                callParams['queryOffset'] = default_time(params['offset'])
+            if 'time' in params:
+                callParams['queryOffset'] = default_time(params['time'])
             x = upcomming_prizes_filter(**callParams)
             query = query.filter(x)
         elif feedName == 'won':
@@ -822,6 +807,6 @@ def apply_feed_filter(query, model, feedName, params, user=None, noslice=False):
             query = query.filter(bid__state='CLOSED')
     elif model == 'event':
         if feedName == 'future':
-            offsettime = default_time(params.get('offset', None))
+            offsettime = default_time(params.get('time', None))
             query = query.filter(datetime__gte=offsettime)
     return query

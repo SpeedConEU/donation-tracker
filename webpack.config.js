@@ -1,4 +1,5 @@
 const webpack = require('webpack');
+const keyMirror = require('keymirror');
 const MiniCssExtractPlugin = require('mini-css-extract-plugin');
 const WebpackManifestPlugin = require('webpack-yam-plugin');
 const path = require('path');
@@ -9,14 +10,6 @@ const PROD = process.env.NODE_ENV === 'production';
 
 console.log(PROD ? 'PRODUCTION BUILD' : 'DEVELOPMENT BUILD');
 
-// TODO: there's a node package that does this, but I can't remember what it's called
-function keyMirror(obj) {
-  return Object.keys(obj).reduce(function(memo, key) {
-    memo[key] = key;
-    return memo;
-  }, {});
-}
-
 function compact(array) {
   return [...array].filter(n => !!n);
 }
@@ -26,7 +19,7 @@ module.exports = {
   mode: PROD ? 'production' : 'development',
   entry: {
     admin: './bundles/admin',
-    donate: './bundles/donate',
+    tracker: './bundles/tracker',
   },
   output: {
     filename: PROD ? 'tracker-[name]-[hash].js' : 'tracker-[name].js',
@@ -61,6 +54,7 @@ module.exports = {
               },
             },
           },
+          'postcss-loader',
         ],
       },
       {
@@ -110,7 +104,7 @@ module.exports = {
     : {
         proxy: [
           {
-            context: ['/admin', '/logout', '/api', '/ui', '/static', '/tracker', '/donate'],
+            context: ['/admin', '/logout', '/api', '/ui', '/static', '/tracker', '/donate', '/media'],
             target: 'http://localhost:8000/',
             headers: { 'X-Webpack': 1 },
           },

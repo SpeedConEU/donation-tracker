@@ -1,20 +1,19 @@
+import calendar
 from decimal import Decimal
-
-from django.db import models
-from django.db.models import signals
-from django.db.models import Count, Sum, Max, Avg
-from django.core.exceptions import ValidationError
-from django.core.urlresolvers import reverse
-from django.dispatch import receiver
-from django.contrib.auth.models import User
-from django.utils import timezone
-
-from .event import LatestEvent
-from .fields import OneToOneOrNoneField
-from ..validators import positive, nonzero
 from functools import reduce
 
-import calendar
+from django.contrib.auth.models import User
+from django.core.exceptions import ValidationError
+from django.core.urlresolvers import reverse
+from django.db import models
+from django.db.models import Count, Sum, Max, Avg
+from django.db.models import signals
+from django.dispatch import receiver
+from django.utils import timezone
+
+from .fields import OneToOneOrNoneField
+from .util import LatestEvent
+from ..validators import positive, nonzero
 
 __all__ = [
     'Donation',
@@ -181,13 +180,13 @@ class Donation(models.Model):
         get_latest_by = 'timereceived'
         ordering = ['-timereceived']
 
+    def get_absolute_url(self):
+        return reverse('tracker:donation', args=(self.id,))
+
     def bid_total(self):
         return reduce(
             lambda a, b: a + b, [b.amount for b in self.bids.all()], Decimal('0.00')
         )
-
-    def prize_ticket_amount(self, targetPrize):
-        return sum([ticket.amount for ticket in self.tickets.filter(prize=targetPrize)])
 
     def anonymous(self):
         """Return whether the donation is anonymous or will be anonymous.
@@ -236,16 +235,6 @@ class Donation(models.Model):
             raise ValidationError(
                 'Bid total is greater than donation amount: %s > %s'
                 % (bidtotal, self.amount)
-            )
-
-        tickets = self.tickets.all()
-        ticketTotal = reduce(
-            lambda a, b: a + b, [b.amount for b in tickets], Decimal('0')
-        )
-        if self.amount and ticketTotal > self.amount:
-            raise ValidationError(
-                'Prize ticket total is greater than donation amount: %s > %s'
-                % (ticketTotal, self.amount)
             )
 
         # TODO: language detection again?
@@ -500,8 +489,20 @@ class DonorCache(models.Model):
         return self.donor.visible_name
 
     @property
+    def firstname(self):
+        return self.donor.firstname
+
+    @property
+    def lastname(self):
+        return self.donor.lastname
+
+    @property
     def visibility(self):
         return self.donor.visibility
+
+    @property
+    def addresscountry(self):
+        return self.donor.addresscountry
 
     def get_absolute_url(self, event=None):
         return self.donor.get_absolute_url(event)

@@ -8,10 +8,8 @@
     "noEmit": true,
     "sourceMap": true,
     "strict": true,
-    "target": "esnext"
+    "target": "esnext",
+    "resolveJsonModule": true
   },
-  "include": [
-    "./bundles/**/*"
-  ],
-  "typeRoots": ["./bundles/typings", "./node_modules/@types"]
+  "include": ["./bundles/**/*"]
 }

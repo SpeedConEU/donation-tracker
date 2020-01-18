@@ -4,17 +4,17 @@ import re
 
 import post_office.models
 import pytz
-
 from django.contrib.auth.models import User
-from django.core import validators
 from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models import signals
-from django.db.utils import OperationalError
 from django.dispatch import receiver
+from django.urls import reverse
 from timezone_field import TimeZoneField
 
-from ..validators import positive, nonzero
+from tracker.validators import positive, nonzero
+from .fields import TimestampField
+from .util import LatestEvent
 
 __all__ = [
     'Event',
@@ -26,109 +26,6 @@ __all__ = [
 
 _timezoneChoices = list([(x, x) for x in pytz.common_timezones])
 _currencyChoices = (('USD', 'US Dollars'), ('CAD', 'Canadian Dollars'))
-
-
-class TimestampValidator(validators.RegexValidator):
-    regex = r'(?:(?:(\d+):)?(?:(\d+):))?(\d+)(?:\.(\d{1,3}))?$'
-
-    def __call__(self, value):
-        super(TimestampValidator, self).__call__(value)
-        h, m, s, ms = re.match(self.regex, str(value)).groups()
-        if h is not None and int(m) >= 60:
-            raise ValidationError(
-                'Minutes cannot be 60 or higher if the hour part is specified'
-            )
-        if m is not None and int(s) >= 60:
-            raise ValidationError(
-                'Seconds cannot be 60 or higher if the minute part is specified'
-            )
-
-
-class TimestampField(models.Field):
-    default_validators = [TimestampValidator()]
-    match_string = re.compile(r'(?:(?:(\d+):)?(?:(\d+):))?(\d+)(?:\.(\d+))?')
-
-    def __init__(
-        self,
-        always_show_h=False,
-        always_show_m=False,
-        always_show_ms=False,
-        *args,
-        **kwargs,
-    ):
-        super(TimestampField, self).__init__(*args, **kwargs)
-        self.always_show_h = always_show_h
-        self.always_show_m = always_show_m
-        self.always_show_ms = always_show_ms
-
-    def from_db_value(self, value, expression, connection, context):
-        return self.to_python(value)
-
-    def to_python(self, value):
-        if isinstance(value, str):
-            try:
-                value = TimestampField.time_string_to_int(value)
-            except ValueError:
-                return value
-        if not value:
-            return '0'
-        h, m, s, ms = (
-            value / 3600000,
-            value / 60000 % 60,
-            value / 1000 % 60,
-            value % 1000,
-        )
-        if h or self.always_show_h:
-            if ms or self.always_show_ms:
-                return '%d:%02d:%02d.%03d' % (h, m, s, ms)
-            else:
-                return '%d:%02d:%02d' % (h, m, s)
-        elif m or self.always_show_m:
-            if ms or self.always_show_ms:
-                return '%d:%02d.%03d' % (m, s, ms)
-            else:
-                return '%d:%02d' % (m, s)
-        else:
-            if ms or self.always_show_ms:
-                return '%d.%03d' % (s, ms)
-            else:
-                return '%d' % s
-
-    @staticmethod
-    def time_string_to_int(value):
-        try:
-            if str(int(value)) == value:
-                return int(value) * 1000
-        except ValueError:
-            pass
-        if not isinstance(value, str):
-            return value
-        if not value:
-            return 0
-        match = TimestampField.match_string.match(value)
-        if not match:
-            raise ValueError('Not a valid timestamp: ' + value)
-        h, m, s, ms = match.groups()
-        s = int(s)
-        m = int(m or s / 60)
-        s %= 60
-        h = int(h or m / 60)
-        m %= 60
-        ms = int(ms or 0)
-        return h * 3600000 + m * 60000 + s * 1000 + ms
-
-    def get_prep_value(self, value):
-        return TimestampField.time_string_to_int(value)
-
-    def get_internal_type(self):
-        return 'IntegerField'
-
-    def validate(self, value, model_instance):
-        super(TimestampField, self).validate(value, model_instance)
-        try:
-            TimestampField.time_string_to_int(value)
-        except ValueError:
-            raise ValidationError('Not a valid timestamp')
 
 
 class EventManager(models.Manager):
@@ -290,6 +187,9 @@ class Event(models.Model):
     def __str__(self):
         return self.name
 
+    def get_absolute_url(self):
+        return reverse('tracker:index', args=(self.id,))
+
     def natural_key(self):
         return (self.short,)
 
@@ -334,15 +234,6 @@ class Event(models.Model):
         get_latest_by = 'datetime'
         permissions = (('can_edit_locked_events', 'Can edit locked events'),)
         ordering = ('datetime',)
-
-
-def LatestEvent():
-    if Event.objects.exists():
-        try:
-            return Event.objects.latest()
-        except (Event.DoesNotExist, OperationalError):
-            return None
-    return None
 
 
 class PostbackURL(models.Model):
@@ -450,6 +341,9 @@ class SpeedRun(models.Model):
         ordering = ['event__datetime', 'order']
         permissions = (('can_view_tech_notes', 'Can view tech notes'),)
 
+    def get_absolute_url(self):
+        return reverse('tracker:run', args=(self.id,))
+
     def natural_key(self):
         return (self.name, self.event.natural_key())
 
@@ -487,6 +381,9 @@ class SpeedRun(models.Model):
                 sorted(str(r) for r in self.runners.all())
             )
 
+        # TODO: strip out force_insert and force_delete? causes issues if you try to insert a run in the middle
+        # with #create with an order parameter, but nobody should be doing that outside of tests anyway?
+        # maybe the admin lets you do it...
         super(SpeedRun, self).save(*args, **kwargs)
 
         # fix up all the others if requested
@@ -541,17 +438,51 @@ class Runner(models.Model):
             return self.get(name__iexact=name)
 
         def get_or_create_by_natural_key(self, name):
-            return self.get_or_create(name=name)
+            return self.get_or_create(name__iexact=name, defaults={'name': name})
 
     class Meta:
         app_label = 'tracker'
 
     objects = _Manager()
-    name = models.CharField(max_length=64, unique=True)
+    name = models.CharField(
+        max_length=64,
+        unique=True,
+        error_messages={
+            'unique': 'Runner with this case-insensitive Name already exists.'
+        },
+    )
     stream = models.URLField(max_length=128, blank=True)
     twitter = models.SlugField(max_length=15, blank=True)
     youtube = models.SlugField(max_length=20, blank=True)
+    platform = models.CharField(
+        max_length=20,
+        default='TWITCH',
+        choices=(
+            ('TWITCH', 'Twitch'),
+            ('MIXER', 'Mixer'),
+            ('FACEBOOK', 'Facebook'),
+            ('YOUTUBE', 'Youtube'),
+        ),
+        help_text='Streaming Platforms',
+    )
+    pronouns = models.CharField(max_length=20, blank=True, help_text='They/Them')
     donor = models.OneToOneField('tracker.Donor', blank=True, null=True)
+
+    def validate_unique(self, exclude=None):
+        case_insensitive = Runner.objects.filter(name__iexact=self.name)
+        if self.id:
+            case_insensitive = case_insensitive.exclude(id=self.id)
+        case_insensitive = case_insensitive.exists()
+        try:
+            super(Runner, self).validate_unique(exclude)
+        except ValidationError as e:
+            if case_insensitive:
+                e.error_dict.setdefault('name', []).append(
+                    self.unique_error_message(Runner, ['name'])
+                )
+            raise
+        if case_insensitive:
+            raise self.unique_error_message(Runner, ['name'])
 
     def natural_key(self):
         return (self.name,)

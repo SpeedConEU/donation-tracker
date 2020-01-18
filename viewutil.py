@@ -11,7 +11,7 @@ from django.db.models.functions import Coalesce
 from django.http import Http404
 
 from . import filters
-from .models import Donor, Event, Log
+from tracker.models import Donor, Event, Log
 from functools import reduce
 
 
@@ -218,20 +218,9 @@ def get_donation_prize_info(donation):
       Does _not_ attempt to relate this information to any _past_ eligibility.
       Returns the set as a list of {'prize','amount'} dictionaries. """
     prizeList = []
-    for ticket in donation.tickets.all():
-        contribAmount = get_donation_prize_contribution(
-            ticket.prize, donation, ticket.amount
-        )
-        if contribAmount is not None:
-            prizeList.append({'prize': ticket.prize, 'amount': contribAmount})
     for timeprize in filters.run_model_query(
         'prize',
-        params={
-            'feed': 'current',
-            'ticketdraw': False,
-            'offset': donation.timereceived,
-            'noslice': True,
-        },
+        params={'feed': 'current', 'time': donation.timereceived, 'noslice': True,},
     ):
         contribAmount = get_donation_prize_contribution(timeprize, donation)
         if contribAmount is not None:
