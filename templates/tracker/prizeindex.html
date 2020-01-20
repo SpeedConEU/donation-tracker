@@ -75,6 +75,11 @@
                             {{ prize.endrun.name_with_category|title }}
                         </a>
                     {% endif %}
+                    {% if prize.starttime %}
+                      <b>Opens:</b> <span class='datetime'>{{ prize.starttime }}</span>
+                      <i class="fa fa-arrows-h"></i>
+                      <b>Closes:</b> <span class='datetime'>{{ prize.endtime }}</span>
+                    {% endif %}
                 </td>
                 <td>
                     {{ prize.category }}
@@ -89,14 +94,16 @@
                     {% endif %}
                 </td>
                 <td>
-                    {% if prize.get_winners %}
-                        {% for winner in prize.get_winners %}
-                            {% if not forloop.first %} - {% endif %}
-                            {% donor_link winner prize.event %}
-                        {% endfor %}
-                    {% else %}
-                        {% trans "None" %}
-                    {% endif %}
+                  {% if prize.key_code %}
+                    {{ prize.get_winners|length }} winner(s)
+                  {% else %}
+                    {% for winner in prize.get_winners %}
+                      {% if not forloop.first %} - {% endif %}
+                      {% donor_link winner prize.event %}
+                    {% empty %}
+                      {% trans "None" %}
+                    {% endfor %}
+                  {% endif %}
                 </td>
             </tr>
         {% endfor %}
