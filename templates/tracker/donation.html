@@ -28,7 +28,7 @@
             </tr>
             </thead>
             <tr>
-                <td class="{{ commentstate }}">
+                <td class="{{ commentstate }} comment-commentpage">
                     {% with donation.comment as comment %}{% with donation.commentstate as state %}
                         {% include "tracker/partials/comment.html" %}
                     {% endwith %}{% endwith %}
