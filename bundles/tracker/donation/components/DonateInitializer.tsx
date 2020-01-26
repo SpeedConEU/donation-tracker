@@ -29,6 +29,7 @@ type DonateInitializerProps = {
     };
     name: string;
     runname: string;
+    order: number;
     amount: string; // TODO: this and goal should be numbers but django seems to be serializing them as strings?
     count: number;
     goal?: string;
@@ -62,7 +63,6 @@ type DonateInitializerProps = {
   donateUrl: string;
   prizes: Array<Prize>;
   prizesUrl: string;
-  rulesUrl?: string;
   csrfToken: string;
 };
 
@@ -73,7 +73,6 @@ const DonateInitializer = (props: DonateInitializerProps) => {
     prizes,
     event: { receivername: receiverName },
     prizesUrl,
-    rulesUrl,
     donateUrl,
     minimumDonation = 1,
     maximumDonation = Infinity,
@@ -126,7 +125,6 @@ const DonateInitializer = (props: DonateInitializerProps) => {
         csrfToken,
         receiverName,
         prizesUrl,
-        rulesUrl,
         donateUrl,
         minimumDonation,
         maximumDonation,
@@ -135,7 +133,7 @@ const DonateInitializer = (props: DonateInitializerProps) => {
         prizes,
       }),
     );
-  }, [dispatch, event, prizesUrl, rulesUrl, donateUrl, minimumDonation, maximumDonation, step, incentives, prizes]);
+  }, [dispatch, event, prizesUrl, donateUrl, minimumDonation, maximumDonation, step, incentives, prizes]);
 
   React.useEffect(() => {
     const presetAmount = CurrencyUtils.parseCurrency(urlHash);

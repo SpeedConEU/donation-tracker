@@ -11,6 +11,7 @@ export type Incentive = {
     description?: string;
   };
   runname: string;
+  order: number;
   count?: number;
   goal?: number;
   description?: string;
@@ -31,7 +32,6 @@ export type EventDetails = {
   csrfToken: string;
   receiverName: string;
   prizesUrl: string;
-  rulesUrl?: string;
   donateUrl: string;
   minimumDonation: number;
   maximumDonation: number;
