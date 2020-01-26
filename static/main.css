@@ -1349,13 +1349,13 @@ textarea {
 }
 
 a {
-	color: 093145;
+	color: #cdcdcd;
 	text-decoration: none
 }
 
 a:focus,
 a:hover {
-	color: #0076a3;
+	color: #969696;
 	text-decoration: underline
 }
 
@@ -10407,7 +10407,7 @@ fieldset[disabled] .datepicker table tr td span.active:hover:hover {
 }
 
 .text-gdq-black {
-	color: #222
+	color: #fff;
 }
 
 .text-gdq-white {
@@ -10883,4 +10883,8 @@ body {
 
 .comment-commentpage {
 	color: #fff;
+}
+
+.table tbody a {
+	color: #0000EE
 }
