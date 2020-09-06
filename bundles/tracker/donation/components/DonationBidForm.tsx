@@ -17,6 +17,7 @@ import { Bid } from '../DonationTypes';
 import validateBid from '../validateBid';
 
 import styles from './DonationBidForm.mod.css';
+import { useCachedCallback } from '../../../public/hooks/useCachedCallback';
 
 type DonationBidFormProps = {
   incentiveId: number;
@@ -71,7 +72,7 @@ const DonationBidForm = (props: DonationBidFormProps) => {
     [selectedChoiceId, allocatedAmount, customOption, incentive, donation, bids, bidChoices, customOptionSelected],
   );
 
-  const handleNewChoice = React.useCallback(choiceId => {
+  const handleNewChoice = useCachedCallback(choiceId => {
     setSelectedChoiceId(choiceId);
     setCustomOptionSelected(choiceId == null);
   }, []);
@@ -98,7 +99,7 @@ const DonationBidForm = (props: DonationBidFormProps) => {
       <Header size={Header.Sizes.H5}>{incentive.name}</Header>
       <Text size={Text.Sizes.SIZE_14}>{incentive.description}</Text>
 
-      {incentive.goal && (
+      {incentive.goal ? (
         <React.Fragment>
           <ProgressBar className={styles.progressBar} progress={(incentive.amount / incentive.goal) * 100} />
           <Text marginless>
@@ -108,7 +109,7 @@ const DonationBidForm = (props: DonationBidFormProps) => {
             </span>
           </Text>
         </React.Fragment>
-      )}
+      ) : null}
 
       <CurrencyInput
         value={allocatedAmount}
@@ -132,7 +133,7 @@ const DonationBidForm = (props: DonationBidFormProps) => {
               checked={selectedChoiceId === choice.id}
               contentClassName={styles.choiceLabel}
               look={Checkbox.Looks.DENSE}
-              onChange={() => handleNewChoice(choice.id)}>
+              onChange={handleNewChoice(choice.id)}>
               <Checkbox.Header>{choice.name}</Checkbox.Header>
               <span className={styles.choiceAmount}>${choice.amount}</span>
             </Checkbox>
@@ -145,7 +146,7 @@ const DonationBidForm = (props: DonationBidFormProps) => {
           name="incentiveBidNewOption"
           checked={customOptionSelected}
           look={Checkbox.Looks.NORMAL}
-          onChange={() => handleNewChoice(null)}>
+          onChange={handleNewChoice(null)}>
           <TextInput
             value={customOption}
             name="incentiveBidCustomOption"

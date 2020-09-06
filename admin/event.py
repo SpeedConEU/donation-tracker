@@ -1,14 +1,18 @@
 import csv
 from datetime import timedelta
+from decimal import Decimal
+from io import StringIO
 
-from django.conf.urls import url
 from django.contrib import messages
 from django.contrib.admin import register
+from django.contrib.auth import models as auth
 from django.contrib.auth.decorators import permission_required
+from django.core.validators import EmailValidator
 from django.db.models import Sum
-from django.http import HttpResponse, HttpResponseRedirect
+from django.http import HttpResponse, HttpResponseRedirect, Http404
 from django.shortcuts import render, redirect
-from django.urls import reverse
+from django.urls import reverse, path
+from django.utils.html import format_html
 
 import tracker.models.fields
 from tracker import models, search_filters, forms, viewutil
@@ -20,18 +24,17 @@ from .forms import (
     SpeedRunAdminForm,
     StartRunForm,
 )
-from .inlines import BidInline, EventBidInline
 from .util import CustomModelAdmin
+from ..auth import send_registration_mail
 
 
 @register(models.Event)
 class EventAdmin(CustomModelAdmin):
     form = EventForm
     search_fields = ('short', 'name')
-    inlines = [EventBidInline]
     list_display = ['name', 'locked', 'allow_donations']
     list_editable = ['locked', 'allow_donations']
-    readonly_fields = ['scheduleid']
+    readonly_fields = ['scheduleid', 'bids']
     fieldsets = [
         (
             None,
@@ -39,6 +42,7 @@ class EventAdmin(CustomModelAdmin):
                 'fields': [
                     'short',
                     'name',
+                    'hashtag',
                     'receivername',
                     'targetamount',
                     'use_one_step_screening',
@@ -86,14 +90,30 @@ class EventAdmin(CustomModelAdmin):
             },
         ),
         ('Google Document', {'classes': ['collapse'], 'fields': ['scheduleid']}),
+        ('Bids', {'fields': ('bids',)}),
     ]
+
+    def bids(self, instance):
+        if instance.id is not None:
+            return format_html(
+                '<a href="{u}?event={id}">View</a>',
+                u=(reverse('admin:tracker_bid_changelist',)),
+                id=instance.id,
+            )
+        else:
+            return 'Not Saved Yet'
 
     def get_urls(self):
         return super(EventAdmin, self).get_urls() + [
-            url(
+            path(
                 'select_event',
                 self.admin_site.admin_view(self.select_event),
                 name='select_event',
+            ),
+            path(
+                'send_volunteer_emails/<int:pk>',
+                self.admin_site.admin_view(self.send_volunteer_emails_view),
+                name='send_volunteer_emails',
             ),
         ]
 
@@ -107,6 +127,129 @@ class EventAdmin(CustomModelAdmin):
         else:
             form = forms.EventFilterForm(**{'event': current})
         return render(request, 'admin/select_event.html', {'form': form})
+
+    def send_volunteer_emails(self, request, queryset):
+        if queryset.count() != 1:
+            self.message_user(
+                request, 'Select exactly one event.', level=messages.ERROR,
+            )
+            return
+        return HttpResponseRedirect(
+            reverse('admin:send_volunteer_emails', args=(queryset.first().id,))
+        )
+
+    @staticmethod
+    @permission_required('auth.change_user', raise_exception=True)
+    def send_volunteer_emails_view(request, pk):
+        event = models.Event.objects.filter(pk=pk, locked=False).first()
+        if event is None:
+            raise Http404
+        if request.method == 'POST':
+            form = forms.SendVolunteerEmailsForm(request.POST, request.FILES)
+            if form.is_valid():
+                volunteers = csv.DictReader(
+                    StringIO(request.FILES['volunteers'].read().decode('utf-8'))
+                )
+                admin_group = auth.Group.objects.get_or_create(name='Bid Admin')[0]
+                tracker_group = auth.Group.objects.get_or_create(name='Bid Tracker')[0]
+                successful = 0
+                for row, volunteer in enumerate(volunteers, start=2):
+                    try:
+                        firstname, space, lastname = (
+                            volunteer['name'].strip().partition(' ')
+                        )
+                        is_head = 'head' in volunteer['position'].strip().lower()
+                        email = volunteer['email'].strip()
+                        EmailValidator()(email)
+                        username = volunteer['username'].strip()
+                        if not username:
+                            raise ValueError('username cannot be blank')
+                        user, created = auth.User.objects.get_or_create(
+                            email__iexact=volunteer['email'],
+                            defaults=dict(
+                                username=username,
+                                first_name=firstname.strip(),
+                                last_name=lastname.strip(),
+                                email=email,
+                                is_active=False,
+                            ),
+                        )
+                        user.is_staff = True
+                        if is_head:
+                            user.groups.add(admin_group)
+                            user.groups.remove(tracker_group)
+                        else:
+                            user.groups.remove(admin_group)
+                            user.groups.add(tracker_group)
+                        user.save()
+
+                        if created:
+                            messages.add_message(
+                                request,
+                                messages.INFO,
+                                f'Created user {volunteer["username"]} with email {volunteer["email"]}',
+                            )
+                        else:
+                            messages.add_message(
+                                request,
+                                messages.INFO,
+                                f'Found existing user {volunteer["username"]} with email {volunteer["email"]}',
+                            )
+
+                        context = dict(
+                            event=event,
+                            is_head=is_head,
+                            password_reset_url=request.build_absolute_uri(
+                                reverse('tracker:password_reset')
+                            ),
+                            registration_url=request.build_absolute_uri(
+                                reverse('tracker:register')
+                            ),
+                        )
+
+                        send_registration_mail(
+                            request,
+                            user,
+                            template=form.cleaned_data['template'],
+                            sender=form.cleaned_data['sender'],
+                            extra_context=context,
+                        )
+                        successful += 1
+                    except Exception as e:
+                        messages.add_message(
+                            request,
+                            messages.ERROR,
+                            f'Could not process row #{row}: {repr(e)}',
+                        )
+                if successful:
+                    messages.add_message(
+                        request, messages.INFO, f'Sent {successful} email(s)'
+                    )
+                return redirect('admin:tracker_event_changelist')
+        else:
+            form = forms.SendVolunteerEmailsForm()
+        return render(
+            request,
+            'admin/generic_form.html',
+            {
+                'form': form,
+                'site_header': 'Send Volunteer Emails',
+                'title': 'Send Volunteer Emails',
+                'breadcrumbs': (
+                    (
+                        reverse('admin:app_list', kwargs=dict(app_label='tracker')),
+                        'Tracker',
+                    ),
+                    (reverse('admin:tracker_event_changelist'), 'Events'),
+                    (
+                        reverse('admin:tracker_event_change', args=(event.id,)),
+                        str(event),
+                    ),
+                    (None, 'Send Volunteer Emails'),
+                ),
+                'action': request.path,
+            },
+        )
 
     def donor_report(self, request, queryset):
         if queryset.count() != 1:
@@ -127,7 +270,7 @@ class EventAdmin(CustomModelAdmin):
         writer.writerow(
             [
                 'All Anonymous Donations',
-                anon.aggregate(Sum('amount'))['amount__sum'],
+                anon.aggregate(Sum('amount'))['amount__sum'].quantize(Decimal('1.00')),
                 anon.count(),
             ]
         )
@@ -353,6 +496,7 @@ class EventAdmin(CustomModelAdmin):
     email_report.short_description = 'Export email opt-in CSV'
 
     actions = [
+        send_volunteer_emails,
         donor_report,
         run_report,
         donation_report,
@@ -430,7 +574,6 @@ class SpeedRunAdmin(CustomModelAdmin):
         'runners__name',
     ]
     list_filter = ['event', RunListFilter]
-    inlines = [BidInline]
     list_display = (
         'name',
         'category',
@@ -464,9 +607,20 @@ class SpeedRunAdmin(CustomModelAdmin):
                 )
             },
         ),
+        ('Bids', {'fields': ('bids',)}),
     ]
-    readonly_fields = ('deprecated_runners', 'starttime')
+    readonly_fields = ('deprecated_runners', 'starttime', 'bids')
     actions = ['start_run']
+
+    def bids(self, instance):
+        if instance.id is not None:
+            return format_html(
+                '<a href="{u}?speedrun={id}">View</a>',
+                u=(reverse('admin:tracker_bid_changelist',)),
+                id=instance.id,
+            )
+        else:
+            return 'Not Saved Yet'
 
     def start_run(self, request, runs):
         if len(runs) != 1:
@@ -541,8 +695,8 @@ class SpeedRunAdmin(CustomModelAdmin):
 
     def get_urls(self):
         return super(SpeedRunAdmin, self).get_urls() + [
-            url(
-                r'start_run/(?P<run>\d+)',
+            path(
+                'start_run/<int:run>',
                 self.admin_site.admin_view(self.start_run_view),
                 name='start_run',
             ),

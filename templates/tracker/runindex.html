@@ -40,7 +40,7 @@
 	{% for run in runs %}
 		<tr class="small">
 			<td>
-				<a href="{% url 'tracker:run' id=run.id %}">{{ run.name_with_category|title }}</a>
+				<a href="{% url 'tracker:run' pk=run.pk %}">{{ run.name_with_category|title }}</a>
 			</td>
 			<td>
 				{{ run.deprecated_runners }}
@@ -48,11 +48,11 @@
 			<td>
 				{{ run.description|forumfilter }}
 			</td>
-			<td>
-				{% datetime run.starttime %}
+			<td class="datetime">
+				{{ run.starttime|date:"c" }}
 			</td>
-			<td>
-				{% datetime run.endtime %}
+			<td class="datetime">
+				{{ run.endtime|date:"c" }}
 			</td>
 			{% autoescape off %}
 			<td>

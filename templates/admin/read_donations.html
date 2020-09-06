@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% load donation_tags %}
-{% load staticfiles %}
+{% load static %}
 
 {% block title %}Read Donations{% endblock %}
 
@@ -80,9 +80,9 @@ function addRow(donation) {
 }
 
 function runSearch() {
-
-  searchParams = {
-    feed : "toread",
+  var searchParams = {
+    feed: "toread",
+    all_comments: "",
   };
 
   {% if currentEvent %}

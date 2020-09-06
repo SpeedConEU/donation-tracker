@@ -1,5 +1,6 @@
 import datetime
 import json
+import logging
 import random
 import traceback
 from decimal import Decimal
@@ -7,9 +8,9 @@ from decimal import Decimal
 import post_office.mail
 import pytz
 from django.core import serializers
-from django.core.urlresolvers import reverse
 from django.db import transaction
 from django.http import HttpResponse, Http404
+from django.urls import reverse
 from django.views.decorators.cache import never_cache, cache_page
 from django.views.decorators.csrf import csrf_exempt
 from paypal.standard.forms import PayPalPaymentsForm
@@ -184,7 +185,7 @@ def donate(request, event):
         if bid.speedrun:
             result['runname'] = bid.speedrun.name
         if bid.suggestions.exists():
-            result['suggested'] = list([x.name for x in bid.suggestions.all()])
+            result['suggested'] = [x.name for x in bid.suggestions.all()]
         if bid.allowuseroptions:
             result['custom'] = ['custom']
             result['label'] += ' (select and add a name next to "New Option Name")'
@@ -291,7 +292,7 @@ def ipn(request):
 
     except Exception as inst:
         # just to make sure we have a record of it somewhere
-        print('ERROR IN IPN RESPONSE, FIX IT')
+        logging.error('ERROR IN IPN RESPONSE, FIX IT')
         if ipnObj:
             paypalutil.log_ipn(
                 ipnObj,

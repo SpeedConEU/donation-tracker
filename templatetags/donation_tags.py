@@ -21,7 +21,7 @@ def tryresolve(var, context, default=None):
 def sortlink(style, contents, **args):
     return format_html(
         '<a href="?{args}"{style}><span style="display:none;">{contents}</span></a>',
-        args=urllib.parse.urlencode([a for a in list(args.items()) if a[1]]),
+        args=urllib.parse.urlencode([a for a in args.items() if a[1]]),
         style=format_html(' class="{style}"', style=style) if style else '',
         contents=contents,
     )
@@ -125,31 +125,6 @@ class PageLinkNode(template.Node):
         return sortlink('', page, sort=sort, order=order, page=page)
 
 
-@register.tag('datetime')
-def do_datetime(parser, token):
-    try:
-        tag_name, date = token.split_contents()
-    except ValueError:
-        raise template.TemplateSyntaxError(
-            '%r tag requires one argument' % token.contents.split()[0]
-        )
-    return DateTimeNode(tag_name, date)
-
-
-class DateTimeNode(template.Node):
-    def __init__(self, tag, date):
-        self.tag = tag
-        self.date = template.Variable(date)
-
-    def render(self, context):
-        date = self.date.resolve(context)
-        return (
-            '<span class="datetime">'
-            + date.strftime('%m/%d/%Y %H:%M:%S')
-            + ' +0000</span>'
-        )
-
-
 @register.tag('rendertime')
 def do_rendertime(parser, token):
     try:
@@ -175,18 +150,6 @@ class RenderTimeNode(template.Node):
             return '%d.%d seconds' % (now.seconds, now.microseconds)
         except template.VariableDoesNotExist:
             return ''
-
-
-@register.simple_tag(takes_context=True, name='donor_link')
-def donor_link(context, donor, event=None):
-    if donor.visibility != 'ANON':
-        return format_html(
-            '<a href="{url}">{name}</a>',
-            url=donor.get_absolute_url(event),
-            name=donor.visible_name(),
-        )
-    else:
-        return donor.ANONYMOUS
 
 
 @register.filter

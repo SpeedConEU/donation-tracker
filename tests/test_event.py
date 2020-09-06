@@ -1,14 +1,17 @@
 import csv
 import io
+import json
 import random
 
+import post_office.models
 import pytz
-from django.contrib.auth.models import User
-from django.core.urlresolvers import reverse
+from django.conf import settings
+from django.contrib.auth.models import User, Group, Permission
 from django.test import TestCase
+from django.urls import reverse
 
-from . import today_noon, tomorrow_noon, long_ago_noon
-from .. import models
+from tracker import models
+from .util import today_noon, tomorrow_noon, long_ago_noon
 from .. import randgen
 
 
@@ -35,15 +38,88 @@ class TestEvent(TestCase):
         self.assertEqual(self.run.starttime, self.event.datetime)
 
 
+class TestEventViews(TestCase):
+    def setUp(self):
+        self.event = models.Event.objects.create(
+            targetamount=1, datetime=today_noon, short='short', name='Short'
+        )
+
+    def test_main_index(self):
+        # TODO: make this more than just a smoke test
+        response = self.client.get(reverse('tracker:index_all'))
+        self.assertContains(response, 'All Events')
+
+    def test_json_with_no_donations(self):
+        response = self.client.get(
+            reverse('tracker:index', args=(self.event.id,)), data={'json': ''}
+        )
+        self.assertEqual(
+            json.loads(response.content),
+            {
+                'count': {'bids': 0, 'donors': 0, 'prizes': 0, 'runs': 0},
+                'agg': {
+                    'amount': 0.0,
+                    'avg': 0.0,
+                    'count': 0,
+                    'max': 0.0,
+                    'target': 1.0,
+                },
+            },
+        )
+
+    def test_json_with_only_pending_donations(self):
+        models.Donation.objects.create(event=self.event, amount=5, domainId='123456')
+        response = self.client.get(
+            reverse('tracker:index', args=(self.event.id,)), data={'json': ''}
+        )
+        self.assertEqual(
+            json.loads(response.content),
+            {
+                'count': {'bids': 0, 'donors': 0, 'prizes': 0, 'runs': 0},
+                'agg': {
+                    'amount': 0.0,
+                    'avg': 0.0,
+                    'count': 0,
+                    'max': 0.0,
+                    'target': 1.0,
+                },
+            },
+        )
+
+    def test_json_with_cleared_donations(self):
+        models.Donation.objects.create(
+            event=self.event, amount=5, domainId='123456', transactionstate='COMPLETED'
+        )
+        models.Donation.objects.create(
+            event=self.event, amount=10, domainId='123457', transactionstate='COMPLETED'
+        )
+        response = self.client.get(
+            reverse('tracker:index', args=(self.event.id,)), data={'json': ''}
+        )
+        self.assertEqual(
+            json.loads(response.content),
+            {
+                'count': {'bids': 0, 'donors': 0, 'prizes': 0, 'runs': 0},
+                'agg': {
+                    'amount': 15.0,
+                    'avg': 7.5,
+                    'count': 2,
+                    'max': 10.0,
+                    'target': 1.0,
+                },
+            },
+        )
+
+
 class TestEventAdmin(TestCase):
     def setUp(self):
         self.super_user = User.objects.create_superuser(
             'admin', 'admin@example.com', 'password'
         )
-        timezone = pytz.timezone('America/New_York')
+        timezone = pytz.timezone(settings.TIME_ZONE)
         self.event = models.Event.objects.create(
             targetamount=5,
-            datetime=timezone.localize(today_noon),
+            datetime=today_noon,
             timezone=timezone,
             name='test event',
             short='test',
@@ -60,6 +136,88 @@ class TestEventAdmin(TestCase):
             reverse('admin:tracker_event_change', args=(self.event.id,))
         )
         self.assertEqual(response.status_code, 200)
+
+    def test_security(self):
+        self.staff = User.objects.create(username='staff', is_staff=True)
+        self.client.force_login(self.staff)
+        response = self.client.get(
+            reverse('admin:send_volunteer_emails', args=(self.event.id,))
+        )
+        self.assertEqual(response.status_code, 403)
+        self.staff.user_permissions.add(Permission.objects.get(name='Can change user'),)
+        response = self.client.get(
+            reverse('admin:send_volunteer_emails', args=(self.event.id,))
+        )
+        self.assertEqual(response.status_code, 200)
+
+    def test_send_volunteer_emails(self):
+        self.template = post_office.models.EmailTemplate.objects.create(
+            name='Test Template'
+        )
+        response = self.client.get(
+            reverse('admin:send_volunteer_emails', args=(self.event.id,))
+        )
+        self.assertEqual(response.status_code, 200)
+        volunteers = io.StringIO(
+            """position,name,username,email
+Head Donations,John Doe,Ribs,johndoe@example.com
+Donations,Jane Doe,Apples,janedoe@example.com
+Donations,Add Min,SHOULD_NOT_CHANGE,admin@example.com
+Donations,,invalid,invalid.email.com
+Donations,,,blank@example.com
+"""
+        )
+        emails = post_office.models.Email.objects.count()
+        users = User.objects.count()
+        response = self.client.post(
+            reverse('admin:send_volunteer_emails', args=(self.event.id,)),
+            data={
+                'template': self.template.id,
+                'sender': 'root@localhost',
+                'volunteers': volunteers,
+            },
+        )
+        self.assertRedirects(response, reverse('admin:tracker_event_changelist'))
+        self.assertEqual(
+            emails + 3,
+            post_office.models.Email.objects.count(),
+            'Did not send three emails',
+        )
+        self.assertEqual(users + 2, User.objects.count(), 'Did not add two users')
+        self.super_user.refresh_from_db()
+        self.assertTrue(
+            Group.objects.get(name='Bid Admin')
+            in User.objects.get(email='johndoe@example.com').groups.all(),
+            'john should belong to Bid Admin',
+        )
+        self.assertFalse(
+            Group.objects.get(name='Bid Tracker')
+            in User.objects.get(email='johndoe@example.com').groups.all(),
+            'john should not belong to Bid Tracker',
+        )
+        self.assertTrue(
+            Group.objects.get(name='Bid Tracker')
+            in User.objects.get(email='janedoe@example.com').groups.all(),
+            'jane should belong to Bid Tracker',
+        )
+        self.assertFalse(
+            Group.objects.get(name='Bid Admin')
+            in User.objects.get(email='janedoe@example.com').groups.all(),
+            'jane should not belong to Bid Admin',
+        )
+        self.assertEqual(
+            self.super_user.username,
+            'admin',
+            'Should not have changed existing username',
+        )
+        self.assertFalse(
+            User.objects.filter(username='invalid').exists(),
+            'Should not have created user with invalid email',
+        )
+        self.assertFalse(
+            User.objects.filter(email='blank@example.com').exists(),
+            'Should not have created user with blank username',
+        )
 
     def test_event_donor_report(self):
         donor1 = randgen.generate_donor(self.rand, visibility='ANON')
@@ -180,6 +338,7 @@ class TestEventAdmin(TestCase):
             50,
             bid_targets_list=[closed_goal] + list(opened_bid.get_children()),
         )
+        closed_goal.refresh_from_db()
         opened_bid.refresh_from_db()
         resp = self.client.post(
             reverse('admin:tracker_event_changelist'),

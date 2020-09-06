@@ -1,77 +1,117 @@
-from django.conf.urls import include, url
+from django.contrib.auth.views import (
+    PasswordResetConfirmView,
+    PasswordResetCompleteView,
+    LoginView,
+    LogoutView,
+    PasswordResetView,
+    PasswordResetDoneView,
+    PasswordChangeView,
+    PasswordChangeDoneView,
+)
+from django.urls import include, reverse_lazy, path
 
-from . import api_urls
-from .feeds.runs_calendar import RunsCalendar
-from .ui import urls as ui_urls
-from .views import public, api, donateviews, user, auth
+from tracker import api_urls
+from tracker.feeds.runs_calendar import RunsCalendar
+from tracker.ui import urls as ui_urls
+from tracker.views import public, api, donateviews, user, auth
 
 app_name = 'tracker'
 urlpatterns = [
-    url(r'^ui/', include(ui_urls, namespace='ui')),
-    url(r'^i18n/', include('django.conf.urls.i18n', namespace='i18n')),
-    url(r'^bids/(?P<event>\w+|)$', public.bidindex, name='bidindex'),
-    url(r'^bid/(?P<id>-?\d+)$', public.bid, name='bid'),
-    url(r'^donors/(?P<event>\w+|)$', public.donorindex, name='donorindex'),
-    url(r'^donor/(?P<id>-?\d+)$', public.donor, name='donor'),
-    url(r'^donor/(?P<id>-?\d+)/(?P<event>\w*)$', public.donor, name='donor'),
-    url(r'^donations/(?P<event>\w+|)$', public.donationindex, name='donationindex'),
-    url(r'^donation/(?P<id>-?\d+)$', public.donation, name='donation'),
-    url(r'^runs/(?P<event>\w+|)$', public.runindex, name='runindex'),
-    url(r'^run/(?P<id>-?\d+)$', public.run, name='run'),
-    url(r'^prizes/(?P<event>\w+|)$', public.prizeindex, name='prizeindex'),
-    url(r'^prize/(?P<id>-?\d+)$', public.prize, name='prize'),
-    url(r'^events/$', public.eventlist, name='eventlist'),
-    url(r'^events/(?P<event>\w+)/calendar$', RunsCalendar(), name='calendar'),
-    url(r'^event/(?P<event>\w+)$', public.index, name='index'),
-    url(r'^$', public.index, name='index_all'),
-    url(r'^donate/(?P<event>\w+)$', donateviews.donate, name='donate'),
-    url(r'^paypal_return/$', donateviews.paypal_return, name='paypal_return'),
-    url(r'^paypal_cancel/$', donateviews.paypal_cancel, name='paypal_cancel'),
-    url(r'^ipn/$', donateviews.ipn, name='ipn'),
-    url(r'^search/$', api.search),
-    url(r'^add/$', api.add),
-    url(r'^edit/$', api.edit),
-    url(r'^delete/$', api.delete),
-    url(r'^command/$', api.command),
-    url(r'^me/$', api.me, name='me'),
-    url(r'^api/v1/', include(api_urls, namespace='api_v1')),
-    url(r'^api/v2/', include('tracker.api.urls')),
-    url(r'^user/index/$', user.user_index, name='user_index'),
-    url(r'^user/user_prize/(?P<prize>\d+)$', user.user_prize, name='user_prize'),
-    url(
-        r'^user/prize_winner/(?P<prize_win>\d+)$',
-        user.prize_winner,
-        name='prize_winner',
-    ),
-    url(r'^user/submit_prize/(?P<event>\w+)$', user.submit_prize, name='submit_prize'),
-    url(r'^user/login/$', auth.login, name='login'),
-    url(r'^user/logout/$', auth.logout, name='logout'),
-    url(r'^user/password_reset/$', auth.password_reset, name='password_reset'),
-    url(
-        r'^user/password_reset_done/$',
-        auth.password_reset_done,
-        name='password_reset_done',
-    ),
-    url(
-        r'^user/password_reset_confirm/$',
-        auth.password_reset_confirm,
-        name='password_reset_confirm',
-    ),
-    url(
-        r'^user/password_reset_complete/$',
-        auth.password_reset_complete,
-        name='password_reset_complete',
-    ),
-    url(r'^user/password_change/$', auth.password_change, name='password_change'),
-    url(
-        r'^user/password_change_done/$',
-        auth.password_change_done,
-        name='password_change_done',
-    ),
-    url(r'^user/register/$', auth.register, name='register'),
-    url(
-        r'^user/confirm_registration/$',
+    path('', public.index, name='index_all'),
+    path('ui/', include(ui_urls, namespace='ui')),
+    path('i18n/', include('django.conf.urls.i18n')),
+    path('bids/<slug:event>', public.bidindex, name='bidindex'),
+    path('bids/', public.bidindex, name='bidindex'),
+    path('bid/<int:pk>', public.bid_detail, name='bid'),
+    path('donors/<slug:event>', public.donorindex, name='donorindex'),
+    path('donors/', public.donorindex, name='donorindex'),
+    path('donor/<int:pk>/<slug:event>', public.donor_detail, name='donor'),
+    path('donor/<int:pk>', public.donor_detail, name='donor'),
+    path('donations/<slug:event>', public.donationindex, name='donationindex'),
+    path('donations/', public.donationindex, name='donationindex'),
+    path('donation/<int:pk>', public.donation_detail, name='donation'),
+    path('runs/<slug:event>', public.runindex, name='runindex'),
+    path('runs/', public.runindex, name='runindex'),
+    path('run/<int:pk>', public.run_detail, name='run'),
+    path('prizes/<slug:event>', public.prizeindex, name='prizeindex'),
+    path('prizes/', public.prizeindex, name='prizeindex'),
+    path('prize/<int:pk>', public.prize_detail, name='prize'),
+    path('events/<slug:event>/calendar', RunsCalendar(), name='calendar'),
+    path('events/', public.eventlist, name='eventlist'),
+    path('event/<slug:event>', public.index, name='index'),
+    path('donate/<slug:event>', donateviews.donate, name='donate'),
+    path('paypal_return/', donateviews.paypal_return, name='paypal_return'),
+    path('paypal_cancel/', donateviews.paypal_cancel, name='paypal_cancel'),
+    path('ipn/', donateviews.ipn, name='ipn'),
+    path('search/', api.search),
+    path('add/', api.add),
+    path('edit/', api.edit),
+    path('delete/', api.delete),
+    path('command/', api.command),
+    path('me/', api.me, name='me'),
+    path('api/v1/', include(api_urls, namespace='api_v1')),
+    path('api/v2/', include('tracker.api.urls')),
+    path('user/index/', user.user_index, name='user_index'),
+    path('user/user_prize/<int:prize>', user.user_prize, name='user_prize'),
+    path('user/prize_winner/<int:prize_win>', user.prize_winner, name='prize_winner',),
+    path('user/submit_prize/<slug:event>', user.submit_prize, name='submit_prize'),
+    path('user/register/', auth.register, name='register'),
+    path(
+        'user/confirm_registration/<uidb64>/<token>/',
         auth.confirm_registration,
         name='confirm_registration',
     ),
+    # all urls below are served by standard Django views
+    path(
+        'user/login/',
+        LoginView.as_view(template_name='tracker/login.html'),
+        name='login',
+    ),
+    path('user/logout/', LogoutView.as_view(next_page='tracker:login'), name='logout',),
+    path(
+        'user/password_reset/',
+        PasswordResetView.as_view(
+            template_name='tracker/password_reset.html',
+            email_template_name='tracker/email/password_reset.txt',
+            html_email_template_name='tracker/email/password_reset.html',
+            success_url=reverse_lazy('tracker:password_reset_done'),
+        ),
+        name='password_reset',
+    ),
+    path(
+        'user/password_reset_done/',
+        PasswordResetDoneView.as_view(template_name='tracker/password_reset_done.html'),
+        name='password_reset_done',
+    ),
+    path(
+        'user/password_reset_confirm/<uidb64>/<token>/',
+        PasswordResetConfirmView.as_view(
+            template_name='tracker/password_reset_confirm.html',
+            success_url=reverse_lazy('tracker:password_reset_complete'),
+        ),
+        name='password_reset_confirm',
+    ),
+    path(
+        'user/password_reset_complete/',
+        PasswordResetCompleteView.as_view(
+            template_name='tracker/password_reset_complete.html'
+        ),
+        name='password_reset_complete',
+    ),
+    path(
+        'user/password_change/',
+        PasswordChangeView.as_view(
+            template_name='tracker/password_change.html',
+            success_url=reverse_lazy('tracker:password_change_done'),
+        ),
+        name='password_change',
+    ),
+    path(
+        'user/password_change_done/',
+        PasswordChangeDoneView.as_view(
+            template_name='tracker/password_change_done.html'
+        ),
+        name='password_change_done',
+    ),
+    path('websocket_test/', public.websocket_test),
 ]

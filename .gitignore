@@ -1,6 +1,7 @@
 *.mo
 *.pyc
 *.swp
+*.sqlite
 build
 *.egg-info
 .webpack_build_cache/
@@ -8,7 +9,4 @@ build
 node_modules/
 static/gen/
 yarn-error.log
-static/admin/css
-static/admin/fonts
-static/admin/img
-static/admin/js
+TEST*.xml

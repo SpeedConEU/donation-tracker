@@ -1,33 +1,32 @@
-import re
-from decimal import Decimal
 import collections
 import datetime
+import re
+from decimal import Decimal
 
+import betterforms.multiform
+import django.core.exceptions
+import django.db.utils
+import post_office
+import post_office.models
 from django import forms
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import User
 from django.contrib.auth.tokens import default_token_generator
-from django.utils.translation import ugettext as _
-from django.utils.safestring import mark_safe
-from django.utils.html import format_html
-from django.utils import timezone
 from django.core import validators
-import django.db.utils
 from django.forms import formset_factory, modelformset_factory
-import django.core.exceptions
+from django.urls import reverse
+from django.utils import timezone
+from django.utils.html import format_html
+from django.utils.safestring import mark_safe
+from django.utils.translation import ugettext as _
 
-import post_office
-import post_office.models
-
-import betterforms.multiform
-
-from tracker import models
+import tracker.auth as auth
+import tracker.prizemail as prizemail
 import tracker.util
 import tracker.viewutil as viewutil
-import tracker.prizemail as prizemail
-import tracker.auth as auth
-from tracker.validators import positive, nonzero
 import tracker.widgets
+from tracker import models
+from tracker.validators import positive, nonzero
 
 __all__ = [
     'UsernameForm',
@@ -43,11 +42,11 @@ __all__ = [
     'PrizeSearchForm',
     'MergeObjectsForm',
     'EventFilterForm',
+    'SendVolunteerEmailsForm',
     'PrizeSubmissionForm',
     'AutomailPrizeContributorsForm',
     'DrawPrizeWinnersForm',
     'AutomailPrizeWinnersForm',
-    'PostOfficePasswordResetForm',
     'RegistrationConfirmationForm',
     'PrizeAcceptanceForm',
     'PrizeAcceptanceWithAddressForm',
@@ -142,7 +141,7 @@ class DonationEntryForm(forms.Form):
 class DonationBidForm(forms.Form):
     bid = forms.fields.IntegerField(
         label='',
-        required=False,
+        required=True,
         widget=tracker.widgets.MegaFilterWidget(model='bidtarget'),
     )
     customoptionname = forms.fields.CharField(
@@ -153,7 +152,7 @@ class DonationBidForm(forms.Form):
     amount = forms.DecimalField(
         decimal_places=2,
         max_digits=20,
-        required=False,
+        required=True,
         validators=[positive, nonzero],
         widget=tracker.widgets.NumberInput(
             attrs={'class': 'cdonationbidamount', 'step': '0.01'}
@@ -162,67 +161,42 @@ class DonationBidForm(forms.Form):
 
     def clean_bid(self):
         try:
-            bid = self.cleaned_data['bid']
-            if not bid:
-                bid = None
-            else:
-                bid = models.Bid.objects.get(id=bid)
-            if bid.state == 'CLOSED':
-                raise forms.ValidationError(
-                    'This bid not open for new donations anymore.'
-                )
-        except Exception:
-            raise forms.ValidationError('Bid does not exist or is closed.')
-        return bid
-
-    def clean_amount(self):
-        try:
-            amount = self.cleaned_data['amount']
-            if not amount:
-                amount = None
-            else:
-                amount = Decimal(amount)
-        except Exception:
-            raise forms.ValidationError('Could not parse amount.')
-        return amount
+            bid = models.Bid.objects.get(id=self.cleaned_data['bid'])
+            if bid.state != 'OPENED':
+                raise forms.ValidationError(_('Bid is no longer open.'))
+            return bid
+        except models.Bid.DoesNotExist:
+            raise forms.ValidationError(_('Bid does not exist.'))
 
     def clean_customoptionname(self):
-        return self.cleaned_data['customoptionname'].strip()
+        return self.cleaned_data.get('customoptionname', '').strip()
 
     def clean(self):
-        if 'amount' not in self.cleaned_data:
-            self.cleaned_data['amount'] = None
-        if 'bid' not in self.cleaned_data:
-            self.cleaned_data['bid'] = None
-        if self.cleaned_data['amount'] and not self.cleaned_data['bid']:
-            raise forms.ValidationError(_('Error, did not specify a bid'))
-        if self.cleaned_data['bid'] and not self.cleaned_data['amount']:
-            raise forms.ValidationError(_('Error, did not specify an amount'))
-        if self.cleaned_data['bid']:
-            bid = self.cleaned_data['bid']
-            if bid.allowuseroptions:
-                customoptionname = self.cleaned_data['customoptionname']
-                if not customoptionname:
-                    raise forms.ValidationError(
-                        _('Error, did not specify a name for the custom option.')
-                    )
-                elif (
-                    bid.option_max_length
-                    and len(customoptionname) > bid.option_max_length
-                ):
-                    raise forms.ValidationError(
-                        {
-                            'bid': _(
-                                'Error, your suggestion was too long, must be {0} characters or less.'.format(
-                                    bid.option_max_length
-                                )
-                            ),
-                        }
-                    )
-                elif self.cleaned_data['amount'] < Decimal('1.00'):
-                    raise forms.ValidationError(
-                        _('Error, you must bid at least one dollar for a custom bid.')
-                    )
+        bid = self.cleaned_data.get('bid', None)
+        if bid and bid.allowuseroptions:
+            customoptionname = self.cleaned_data['customoptionname']
+            if not customoptionname:
+                raise forms.ValidationError(
+                    {'customoptionname': _('Suggestions cannot be blank.')}
+                )
+            elif (
+                bid.option_max_length and len(customoptionname) > bid.option_max_length
+            ):
+                raise forms.ValidationError(
+                    {
+                        'customoptionname': _(
+                            f'Suggestion was too long, it must be {bid.option_max_length} characters or less.'
+                        ),
+                    }
+                )
+            elif self.cleaned_data['amount'] < Decimal('1.00'):
+                raise forms.ValidationError(
+                    {
+                        'amount': _(
+                            'New suggestions must have at least a dollar allocated.'
+                        )
+                    }
+                )
         return self.cleaned_data
 
 
@@ -375,6 +349,14 @@ class EventFilterForm(forms.Form):
             initial=event,
             required=not allow_empty,
         )
+
+
+class SendVolunteerEmailsForm(forms.Form):
+    template = forms.ModelChoiceField(
+        post_office.models.EmailTemplate.objects.all(), empty_label=None
+    )
+    sender = forms.EmailField()
+    volunteers = forms.FileField()
 
 
 class PrizeSubmissionForm(forms.Form):
@@ -561,9 +543,9 @@ class AutomailPrizeContributorsForm(forms.Form):
     def clean(self):
         if not self.cleaned_data['replyaddress']:
             self.cleaned_data['replyaddress'] = self.cleaned_data['fromaddress']
-        self.cleaned_data['prizes'] = list(
-            [models.Prize.objects.get(id=x) for x in self.cleaned_data['prizes']]
-        )
+        self.cleaned_data['prizes'] = [
+            models.Prize.objects.get(id=x) for x in self.cleaned_data['prizes']
+        ]
         return self.cleaned_data
 
 
@@ -597,9 +579,9 @@ class DrawPrizeWinnersForm(forms.Form):
         )
 
     def clean(self):
-        self.cleaned_data['prizes'] = list(
-            [models.Prize.objects.get(id=x) for x in self.cleaned_data['prizes']]
-        )
+        self.cleaned_data['prizes'] = [
+            models.Prize.objects.get(id=x) for x in self.cleaned_data['prizes']
+        ]
         return self.cleaned_data
 
 
@@ -641,11 +623,15 @@ class AutomailPrizeWinnersForm(forms.Form):
                     prizewinner.id,
                     mark_safe(
                         format_html(
-                            '<a href="{0}">{1}</a>: <a href="{2}">{3}</a>',
+                            '<a href="{0}">{1}</a>: <a href="{2}">{3}</a> <a href="{4}">Preview</a>',
                             viewutil.admin_url(prize),
                             prize,
                             viewutil.admin_url(winner),
                             winner,
+                            reverse(
+                                'admin:preview_prize_winner_mail',
+                                args=(prizewinner.id,),
+                            ),
                         )
                     ),
                 )
@@ -660,11 +646,11 @@ class AutomailPrizeWinnersForm(forms.Form):
         )
 
     def clean(self):
-        if not self.cleaned_data['replyaddress']:
+        if not self.cleaned_data.get('replyaddress', ''):
             self.cleaned_data['replyaddress'] = self.cleaned_data['fromaddress']
         self.cleaned_data['prizewinners'] = [
             models.PrizeWinner.objects.get(id=pw)
-            for pw in self.cleaned_data['prizewinners']
+            for pw in self.cleaned_data.get('prizewinners', [])
         ]
         return self.cleaned_data
 
@@ -725,12 +711,10 @@ class AutomailPrizeAcceptNotifyForm(forms.Form):
     def clean(self):
         if not self.cleaned_data['replyaddress']:
             self.cleaned_data['replyaddress'] = self.cleaned_data['fromaddress']
-        self.cleaned_data['prizewinners'] = list(
-            [
-                models.PrizeWinner.objects.get(id=x)
-                for x in self.cleaned_data['prizewinners']
-            ]
-        )
+        self.cleaned_data['prizewinners'] = [
+            models.PrizeWinner.objects.get(id=x)
+            for x in self.cleaned_data['prizewinners']
+        ]
         return self.cleaned_data
 
 
@@ -790,60 +774,11 @@ class AutomailPrizeShippingNotifyForm(forms.Form):
     def clean(self):
         if not self.cleaned_data['replyaddress']:
             self.cleaned_data['replyaddress'] = self.cleaned_data['fromaddress']
-        self.cleaned_data['prizewinners'] = list(
-            [
-                models.PrizeWinner.objects.get(id=x)
-                for x in self.cleaned_data['prizewinners']
-            ]
-        )
+        self.cleaned_data['prizewinners'] = [
+            models.PrizeWinner.objects.get(id=x)
+            for x in self.cleaned_data['prizewinners']
+        ]
         return self.cleaned_data
-
-
-class PostOfficePasswordResetForm(forms.Form):
-    email = forms.EmailField(label='Email', max_length=254)
-
-    def get_user(self):
-        AuthUser = get_user_model()
-        email = self.cleaned_data['email']
-        userSet = AuthUser.objects.filter(email__iexact=email, is_active=True)
-        if not userSet.exists():
-            raise forms.ValidationError(
-                'User with email {0} does not exist.'.format(email)
-            )
-        elif userSet.count() != 1:
-            raise forms.ValidationError(
-                'More than one user has the e-mail {0}. Ideally this would be a db constraint, but django is stupid.'.format(
-                    email
-                )
-            )
-        return userSet[0]
-
-    def clean_email(self):
-        return self.get_user().email
-
-    def save(
-        self,
-        email_template_name=None,
-        use_https=False,
-        token_generator=default_token_generator,
-        from_email=None,
-        request=None,
-        email_template=None,
-        **kwargs,
-    ):
-        if not email_template:
-            email_template = email_template_name
-        if not email_template:
-            email_template = auth.default_password_reset_template()
-        user = self.get_user()
-        domain = viewutil.get_request_server_url(request)
-        return auth.send_password_reset_mail(
-            domain,
-            user,
-            email_template,
-            sender=from_email,
-            token_generator=token_generator,
-        )
 
 
 class RegistrationForm(forms.Form):
@@ -860,11 +795,9 @@ class RegistrationForm(forms.Form):
     def save(
         self,
         email_template=None,
-        use_https=False,
         token_generator=default_token_generator,
         from_email=None,
         request=None,
-        domain=None,
         **kwargs,
     ):
         if not email_template:
@@ -891,10 +824,8 @@ class RegistrationForm(forms.Form):
                 raise forms.ValidationError(
                     'Something horrible happened, please try again'
                 )
-        if domain is None:
-            domain = viewutil.get_request_server_url(request)
         return auth.send_registration_mail(
-            domain,
+            request,
             user,
             template=email_template,
             sender=from_email,
@@ -960,16 +891,13 @@ class RegistrationConfirmationForm(forms.Form):
 
     def clean_username(self):
         AuthUser = get_user_model()
-        usersWithName = AuthUser.objects.filter(
-            username__iexact=self.cleaned_data['username']
+        cleaned = AuthUser.normalize_username(self.cleaned_data['username'])
+        existing = AuthUser.objects.filter(username__iexact=cleaned).exclude(
+            pk=self.user.pk
         )
-        if not usersWithName.exists() or (
-            usersWithName.count() == 1 and usersWithName[0] == self.user
-        ):
-            return self.cleaned_data['username']
-        raise forms.ValidationError(
-            'Username {0} is already taken'.format(self.cleaned_data['username'])
-        )
+        if existing.exists():
+            raise forms.ValidationError(f'Username {cleaned} is already taken')
+        return cleaned
 
     def clean_password(self):
         if not self.cleaned_data['password']:
@@ -1013,7 +941,7 @@ class PrizeAcceptanceForm(forms.ModelForm):
 
         self.fields['count'] = forms.ChoiceField(
             initial=self.instance.pendingcount,
-            choices=list([(x, x) for x in range(1, self.instance.pendingcount + 1)]),
+            choices=[(x, x) for x in range(1, self.instance.pendingcount + 1)],
             label='Count',
             help_text='You were selected to win more than one copy of this prize, please select how many you would like to take, or press Deny All if you do not want any of them.',
         )

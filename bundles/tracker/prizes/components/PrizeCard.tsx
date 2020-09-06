@@ -1,7 +1,6 @@
-import * as React from 'react';
+import React, { useState, useCallback } from 'react';
 import classNames from 'classnames';
 import { useSelector } from 'react-redux';
-import _ from 'lodash';
 
 import * as CurrencyUtils from '../../../public/util/currency';
 import TimeUtils from '../../../public/util/TimeUtils';
@@ -12,13 +11,13 @@ import Text from '../../../uikit/Text';
 import { StoreState } from '../../Store';
 import RouterUtils, { Routes } from '../../router/RouterUtils';
 import * as PrizeStore from '../PrizeStore';
-import { Prize } from '../PrizeTypes';
 import getPrizeRelativeAvailability from '../getPrizeRelativeAvailability';
 import * as PrizeUtils from '../PrizeUtils';
 
 import styles from './PrizeCard.mod.css';
 
 type PrizeCardProps = {
+  // TODO: should be a number
   prizeId: string;
   className?: string;
 };
@@ -27,23 +26,28 @@ const PrizeCard = (props: PrizeCardProps) => {
   const { prizeId, className } = props;
   const now = TimeUtils.getNowLocal();
 
+  const [prizeError, setPrizeError] = useState(false);
+  const setPrizeErrorTrue = useCallback(() => setPrizeError(true), []);
+
   const prize = useSelector((state: StoreState) => PrizeStore.getPrize(state, { prizeId }));
 
-  const handleViewPrize = (prize: Prize) => {
-    RouterUtils.navigateTo(Routes.EVENT_PRIZE(prize.eventId, prizeId));
-  };
+  const handleViewPrize = useCallback(() => {
+    if (prize) {
+      RouterUtils.navigateTo(Routes.EVENT_PRIZE(prize.eventId, prize.id));
+    }
+  }, [prize]);
 
   if (prize == null) {
     return <div className={styles.card} />;
   }
 
-  const coverImage = PrizeUtils.getPrimaryImage(prize);
+  const coverImage = prizeError ? null : PrizeUtils.getPrimaryImage(prize);
 
   return (
-    <Clickable className={classNames(styles.card, className)} onClick={() => handleViewPrize(prize)}>
+    <Clickable className={classNames(styles.card, className)} onClick={handleViewPrize}>
       <div className={styles.imageWrap}>
         {coverImage != null ? (
-          <img className={styles.coverImage} src={coverImage} />
+          <img alt={prize.public} onError={setPrizeErrorTrue} className={styles.coverImage} src={coverImage} />
         ) : (
           <div className={styles.noCoverImage}>
             <Header size={Header.Sizes.H4} color={Header.Colors.MUTED}>

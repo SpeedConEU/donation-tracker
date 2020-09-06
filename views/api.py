@@ -15,7 +15,17 @@ from django.core.exceptions import (
 )
 from django.core.serializers.json import DjangoJSONEncoder
 from django.db import transaction, connection
-from django.db.models import Sum, Count, Max, Avg
+from django.db.models import (
+    Sum,
+    Count,
+    Max,
+    Avg,
+    When,
+    Case,
+    F,
+    DecimalField,
+    IntegerField,
+)
 from django.db.models.functions import Coalesce
 from django.db.utils import IntegrityError
 from django.http import HttpResponse, QueryDict
@@ -151,6 +161,7 @@ included_fields = {
         '__self__': [
             'short',
             'name',
+            'hashtag',
             'receivername',
             'targetamount',
             'minimumdonation',
@@ -196,14 +207,28 @@ included_fields = {
     },
 }
 
+EVENT_DONATION_AGGREGATE_FILTER = Case(
+    When(EventAggregateFilter, then=F('donation__amount')),
+    output_field=DecimalField(decimal_places=2),
+)
+
 annotations = {
     'event': {
-        'amount': Coalesce(Sum('donation__amount', only=EventAggregateFilter), 0),
-        'count': Count('donation', only=EventAggregateFilter),
-        'max': Coalesce(Max('donation__amount', only=EventAggregateFilter), 0),
-        'avg': Coalesce(Avg('donation__amount', only=EventAggregateFilter), 0),
+        'amount': Coalesce(Sum(EVENT_DONATION_AGGREGATE_FILTER), 0),
+        'count': Count(EVENT_DONATION_AGGREGATE_FILTER),
+        'max': Coalesce(Max(EVENT_DONATION_AGGREGATE_FILTER), 0),
+        'avg': Coalesce(Avg(EVENT_DONATION_AGGREGATE_FILTER), 0),
     },
-    'prize': {'numwinners': Count('prizewinner', only=PrizeWinnersFilter),},
+    'prize': {
+        'numwinners': Count(
+            Case(When(PrizeWinnersFilter, then=1), output_field=IntegerField())
+        ),
+    },
+}
+
+annotation_coercions = {
+    'event': {'amount': float, 'count': int, 'max': float, 'avg': float,},
+    'prize': {'numwinners': int,},
 }
 
 
@@ -334,17 +359,26 @@ def search(request):
     limit_param = int(single(search_params, 'limit', limit))
     if limit_param > limit:
         raise ValueError('limit can not be above %d' % limit)
+    if limit_param < 1:
+        raise ValueError('limit must be at least 1')
     limit = min(limit, limit_param)
 
     qs = search_filters.run_model_query(search_type, search_params, request.user,)
+
+    qs = qs[offset : (offset + limit)]
+
+    # Django 3.1 doesn't like Model.Meta.ordering when combined with annotations, so this guarantees the
+    # correct subset when using annotations, even if it does result in an extra query
+    if search_type in annotations:
+        qs = (
+            Model.objects.filter(pk__in=(m.pk for m in qs))
+            .annotate(**annotations[search_type])
+            .order_by()
+        )
     if search_type in related:
         qs = qs.select_related(*related[search_type])
     if search_type in prefetch:
         qs = qs.prefetch_related(*prefetch[search_type])
-    if search_type in annotations:
-        qs = qs.annotate(**annotations[search_type])
-
-    qs = qs[offset : (offset + limit)]
 
     include_fields = included_fields.get(search_type, {})
 
@@ -362,7 +396,8 @@ def search(request):
         else:
             obj['fields']['public'] = str(base_obj)
         for a in annotations.get(search_type, {}):
-            obj['fields'][a] = str(getattr(objs[int(obj['pk'])], a))
+            func = annotation_coercions.get(search_type, {}).get(a, str)
+            obj['fields'][a] = func(getattr(base_obj, a))
         for prefetched_field in prefetch.get(search_type, []):
             if '__' in prefetched_field:
                 continue
@@ -370,7 +405,7 @@ def search(request):
                 po.id for po in getattr(base_obj, prefetched_field).all()
             ]
         for related_field in related.get(search_type, []):
-            related_object = objs[int(obj['pk'])]
+            related_object = base_obj
             for field in related_field.split('__'):
                 if not related_object:
                     break
@@ -527,7 +562,7 @@ def add(request):
         raise PermissionDenied(
             'You do not have permission to add a model of the requested type'
         )
-    good_fields = filter_fields(list(add_params.keys()), model_admin, request)
+    good_fields = filter_fields(add_params.keys(), model_admin, request)
     bad_fields = set(good_fields) - set(add_params.keys())
     if bad_fields:
         raise PermissionDenied(
@@ -537,20 +572,20 @@ def add(request):
     newobj = Model()
     changed_fields = []
     m2m_collections = []
-    for k, v in list(add_params.items()):
+    for k, v in add_params.items():
         if k in ('type', 'id'):
             continue
         new_value = parse_value(Model, k, v, request.user)
         if type(new_value) == list:  # accounts for m2m relationships
             m2m_collections.append((k, new_value))
-            new_value = list(map(str, new_value))
+            new_value = [str(x) for x in new_value]
         else:
             setattr(newobj, k, new_value)
         changed_fields.append('Set %s to "%s".' % (k, new_value))
     newobj.full_clean()
     models = newobj.save() or [newobj]
     for k, v in m2m_collections:
-        setattr(newobj, k, v)
+        getattr(newobj, k).set(v)
     logutil.addition(request, newobj)
     logutil.change(request, newobj, ' '.join(changed_fields))
     resp = HttpResponse(
@@ -610,7 +645,7 @@ def edit(request):
     obj = Model.objects.get(pk=edit_params['id'])
     if not model_admin.has_change_permission(request, obj):
         raise PermissionDenied('You do not have permission to change that object')
-    good_fields = filter_fields(list(edit_params.keys()), model_admin, request)
+    good_fields = filter_fields(edit_params.keys(), model_admin, request)
     bad_fields = set(good_fields) - set(edit_params.keys())
     if bad_fields:
         raise PermissionDenied(
@@ -618,16 +653,18 @@ def edit(request):
             % ','.join(sorted(bad_fields))
         )
     changed_fields = []
-    for k, v in list(edit_params.items()):
+    for k, v in edit_params.items():
         if k in ('type', 'id'):
             continue
         old_value = getattr(obj, k)
         if hasattr(old_value, 'all'):  # accounts for m2m relationships
-            old_value = list(map(str, old_value.all()))
+            old_value = [str(x) for x in old_value.all()]
         new_value = parse_value(Model, k, v, request.user)
-        setattr(obj, k, new_value)
         if type(new_value) == list:  # accounts for m2m relationships
-            new_value = list(map(str, new_value))
+            getattr(obj, k).set(new_value)
+            new_value = [str(x) for x in new_value]
+        else:
+            setattr(obj, k, new_value)
         if str(old_value) != str(new_value):
             if old_value and not new_value:
                 changed_fields.append('Changed %s from "%s" to empty.' % (k, old_value))
@@ -685,7 +722,7 @@ def command(request):
 @never_cache
 @require_GET
 def me(request):
-    if request.user.is_anonymous() or not request.user.is_active:
+    if request.user.is_anonymous or not request.user.is_active:
         raise PermissionDenied
     output = {'username': request.user.username}
     if request.user.is_superuser:

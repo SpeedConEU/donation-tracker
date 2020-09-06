@@ -17,11 +17,11 @@ import tracker.models as models
 import tracker.randgen as randgen
 import tracker.views.api
 from tracker.serializers import TrackerSerializer
-from . import APITestCase, today_noon, tomorrow_noon
+from .util import today_noon, tomorrow_noon, APITestCase
 
 
 def format_time(dt):
-    return dt.astimezone(pytz.utc).isoformat()[:-6] + 'Z'
+    return DjangoJSONEncoder().default(dt)
 
 
 class TestGeneric(APITestCase):
@@ -59,6 +59,11 @@ class TestGeneric(APITestCase):
         request = self.factory.get('/api/v1/search', dict(type='donation', limit=30),)
         request.user = self.anonymous_user
         # bad request if limit is set above server config
+        self.parseJSON(tracker.views.api.search(request), status_code=400)
+
+        request = self.factory.get('/api/v1/search', dict(type='donation', limit=-1),)
+        request.user = self.anonymous_user
+        # bad request if limit is negative
         self.parseJSON(tracker.views.api.search(request), status_code=400)
 
     def test_add_log(self):
@@ -197,6 +202,12 @@ class TestSpeedRun(APITestCase):
             order=1,
             event=self.event2,
         )
+        # TODO: something about resetting the timestamps to the right format idk
+        self.run1.refresh_from_db()
+        self.run2.refresh_from_db()
+        self.run3.refresh_from_db()
+        self.run4.refresh_from_db()
+        self.run5.refresh_from_db()
 
     @classmethod
     def format_run(cls, run):
@@ -622,9 +633,7 @@ class TestRunner(APITestCase):
         )
         request.user = self.add_user
         data = self.parseJSON(tracker.views.api.add(request), status_code=400)
-        self.assertRegexpMatches(
-            data['messages'][0], 'case-insensitive.*already exists'
-        )
+        self.assertRegex(data['messages'][0], 'case-insensitive.*already exists')
 
     def test_search_by_event(self):
         request = self.factory.get(
@@ -706,11 +715,11 @@ class TestPrize(APITestCase):
                 provider=prize.provider,
                 maxmultiwin=prize.maxmultiwin,
                 maxwinners=prize.maxwinners,
-                numwinners=str(len(prize.get_prize_winners())),
+                numwinners=len(prize.get_prize_winners()),
                 custom_country_filter=prize.custom_country_filter,
                 estimatedvalue=prize.estimatedvalue,
-                minimumbid=str(prize.minimumbid),
-                maximumbid=str(prize.maximumbid),
+                minimumbid=prize.minimumbid,
+                maximumbid=prize.maximumbid,
                 sumdonations=prize.sumdonations,
                 randomdraw=prize.randomdraw,
                 event=prize.event_id,
@@ -741,6 +750,17 @@ class TestPrize(APITestCase):
             startrun=self.event.speedrun_set.first(),
             endrun=self.event.speedrun_set.first(),
             image='https://example.com/example.jpg',
+            maxwinners=3,
+        )
+        donors = randgen.generate_donors(self.rand, 3)
+        models.PrizeWinner.objects.create(
+            prize=prize, acceptcount=1, pendingcount=0, declinecount=0, winner=donors[0]
+        )
+        models.PrizeWinner.objects.create(
+            prize=prize, acceptcount=0, pendingcount=1, declinecount=0, winner=donors[1]
+        )
+        models.PrizeWinner.objects.create(
+            prize=prize, acceptcount=0, pendingcount=0, declinecount=1, winner=donors[2]
         )
         prize.refresh_from_db()
         request = self.factory.get('/api/v1/search', dict(type='prize',),)
@@ -826,20 +846,44 @@ class TestEvent(APITestCase):
         models.Donation.objects.create(
             event=self.event, amount=5, domainId='123457', transactionstate='COMPLETED'
         )
+        # there was a bug where events with only pending donations wouldn't come back in the search
+        models.Donation.objects.create(
+            event=self.locked_event, amount=10, domainId='123458'
+        )
+        # make sure empty events show up too
+        extra_event = randgen.generate_event(self.rand, today_noon)
+        extra_event.save()
         request = self.factory.get('/api/v1/search', dict(type='event'))
         request.user = self.add_user
         data = self.parseJSON(tracker.views.api.search(request))
-        self.assertEqual(len(data), 2)
-        event_data = next(e for e in data if e['pk'] == self.locked_event.id)['fields']
-        self.assertEqual(event_data['amount'], '0.00')
-        self.assertEqual(event_data['count'], '0')
-        self.assertEqual(event_data['max'], '0.00')
-        self.assertEqual(event_data['avg'], '0.0')
-        event_data = next(e for e in data if e['pk'] == self.event.id)['fields']
-        self.assertEqual(event_data['amount'], '5.00')
-        self.assertEqual(event_data['count'], '1')
-        self.assertEqual(event_data['max'], '5.00')
-        self.assertEqual(event_data['avg'], '5.0')
+        self.assertEqual(len(data), 3)
+        self.assertModelPresent(
+            {
+                'pk': self.event.id,
+                'model': 'tracker.event',
+                'fields': {'amount': 5.0, 'count': 1, 'max': 5.0, 'avg': 5.0},
+            },
+            data,
+            partial=True,
+        )
+        self.assertModelPresent(
+            {
+                'pk': self.locked_event.id,
+                'model': 'tracker.event',
+                'fields': {'amount': 0.0, 'count': 0, 'max': 0.0, 'avg': 0.0},
+            },
+            data,
+            partial=True,
+        )
+        self.assertModelPresent(
+            {
+                'pk': extra_event.id,
+                'model': 'tracker.event',
+                'fields': {'amount': 0.0, 'count': 0, 'max': 0.0, 'avg': 0.0},
+            },
+            data,
+            partial=True,
+        )
 
 
 class TestBid(APITestCase):
@@ -930,7 +974,7 @@ class TestBid(APITestCase):
                 goal=bid.goal,
                 state=bid.state,
                 istarget=bid.istarget,
-                revealedtime=bid.revealedtime,
+                revealedtime=format_time(bid.revealedtime),
                 allowuseroptions=bid.allowuseroptions,
                 biddependency=bid.biddependency_id,
                 option_max_length=bid.option_max_length,

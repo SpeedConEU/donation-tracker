@@ -4,9 +4,9 @@ from decimal import Decimal
 
 from django.conf import settings
 from django.core import serializers
-from django.core.urlresolvers import reverse
 from django.http import Http404
 from django.shortcuts import render
+from django.urls import reverse
 from django.utils.safestring import mark_safe
 from django.views.decorators.cache import cache_page
 from django.views.decorators.csrf import csrf_protect
@@ -20,8 +20,8 @@ from tracker.views.donateviews import process_form
 
 def constants():
     return {
-        'PRIVACY_POLICY_URL': settings.PRIVACY_POLICY_URL,
-        'SWEEPSTAKES_URL': settings.SWEEPSTAKES_URL,
+        'PRIVACY_POLICY_URL': getattr(settings, 'PRIVACY_POLICY_URL', ''),
+        'SWEEPSTAKES_URL': getattr(settings, 'SWEEPSTAKES_URL', ''),
         'API_ROOT': reverse('tracker:api_v1:root'),
         'APP_NAME': 'tracker',
         'STATIC_URL': settings.STATIC_URL,
@@ -61,7 +61,7 @@ def index(request, **kwargs):
 @csrf_protect
 @cache_page(60)
 @no_querystring
-def admin(request):
+def admin(request, **kwargs):
     bundle = webpack_manifest.load(
         os.path.abspath(
             os.path.join(os.path.dirname(__file__), '../ui-tracker.manifest.json')
@@ -179,13 +179,13 @@ def donate(request, event):
 
     initialForm = {
         k: to_json(commentform.cleaned_data[k])
-        for k, v in list(commentform.fields.items())
+        for k, v in commentform.fields.items()
         if commentform.is_bound and k in commentform.cleaned_data
     }
     pickedIncentives = [
         {
             k: to_json(form.cleaned_data[k])
-            for k, v in list(form.fields.items())
+            for k, v in form.fields.items()
             if k in form.cleaned_data
         }
         for form in bidsform.forms

@@ -1,14 +1,12 @@
 import React from 'react';
-import PropTypes from 'prop-types';
 import { useSelector } from 'react-redux';
-import _ from 'lodash';
 
 import * as CurrencyUtils from '../../../public/util/currency';
-import Alert from '../../../uikit/Alert';
 import Anchor from '../../../uikit/Anchor';
 import Button from '../../../uikit/Button';
 import Container from '../../../uikit/Container';
 import CurrencyInput from '../../../uikit/CurrencyInput';
+import ErrorAlert from '../../../uikit/ErrorAlert';
 import Header from '../../../uikit/Header';
 import RadioGroup from '../../../uikit/RadioGroup';
 import Text from '../../../uikit/Text';
@@ -21,8 +19,9 @@ import * as DonationStore from '../DonationStore';
 import DonationIncentives from './DonationIncentives';
 import DonationPrizes from './DonationPrizes';
 
-import { EMAIL_OPTIONS, AMOUNT_PRESETS } from '../DonationConstants';
+import { AMOUNT_PRESETS, EMAIL_OPTIONS } from '../DonationConstants';
 import styles from './Donate.mod.css';
+import { useCachedCallback } from '../../../public/hooks/useCachedCallback';
 
 type DonateProps = {
   eventId: string | number;
@@ -32,14 +31,16 @@ const Donate = (props: DonateProps) => {
   const dispatch = useDispatch();
   const { eventId } = props;
 
-  const { eventDetails, prizes, donation, bids, donationValidity, formError } = useSelector((state: StoreState) => ({
-    eventDetails: EventDetailsStore.getEventDetails(state),
-    prizes: EventDetailsStore.getPrizes(state),
-    donation: DonationStore.getDonation(state),
-    bids: DonationStore.getBids(state),
-    formError: DonationStore.getFormError(state),
-    donationValidity: DonationStore.validateDonation(state),
-  }));
+  const { eventDetails, prizes, donation, bids, donationValidity, commentErrors } = useSelector(
+    (state: StoreState) => ({
+      eventDetails: EventDetailsStore.getEventDetails(state),
+      prizes: EventDetailsStore.getPrizes(state),
+      donation: DonationStore.getDonation(state),
+      bids: DonationStore.getBids(state),
+      commentErrors: DonationStore.getCommentFormErrors(state),
+      donationValidity: DonationStore.validateDonation(state),
+    }),
+  );
 
   const { receiverName, donateUrl, minimumDonation, maximumDonation, step } = eventDetails;
   const { name, email, wantsEmails, amount, comment } = donation;
@@ -57,29 +58,36 @@ const Donate = (props: DonateProps) => {
     }
   }, [donateUrl, eventDetails.csrfToken, donation, bids, donationValidity]);
 
+  const updateName = React.useCallback(name => updateDonation({ name }), [updateDonation]);
+  const updateEmail = React.useCallback(email => updateDonation({ email }), [updateDonation]);
+  const updateWantsEmails = React.useCallback(value => updateDonation({ wantsEmails: value }), [updateDonation]);
+  const updateAmount = React.useCallback(amount => updateDonation({ amount }), [updateDonation]);
+  const updateAmountPreset = useCachedCallback(amountPreset => updateDonation({ amount: amountPreset }), [
+    updateDonation,
+  ]);
+  const updateComment = React.useCallback(comment => updateDonation({ comment }), [updateDonation]);
+
   return (
     <Container>
-      {formError != null ? (
-        <Alert className={styles.alert}>
-          <Text marginless>{formError}</Text>
-        </Alert>
-      ) : null}
+      <ErrorAlert errors={commentErrors.__all__} />
       <Header size={Header.Sizes.H1} marginless>
         Thank You For Your Donation
       </Header>
       <Text size={Text.Sizes.SIZE_16}>100% of your donation goes directly to {receiverName}.</Text>
 
       <section className={styles.section}>
+        <ErrorAlert errors={commentErrors.requestedalias} />
         <TextInput
           name="alias"
           value={name}
           label="Preferred Name/Alias"
           hint="Leave blank to donate anonymously"
           size={TextInput.Sizes.LARGE}
-          onChange={name => updateDonation({ name })}
+          onChange={updateName}
           maxLength={32}
           autoFocus
         />
+        <ErrorAlert errors={commentErrors.requestedemail} />
         <TextInput
           name="email"
           value={email}
@@ -93,9 +101,11 @@ const Donate = (props: DonateProps) => {
           }
           size={TextInput.Sizes.LARGE}
           type={TextInput.Types.EMAIL}
-          onChange={email => updateDonation({ email })}
+          onChange={updateEmail}
           maxLength={128}
         />
+
+        <ErrorAlert errors={commentErrors.requestedsolicitemail} />
 
         <Text size={Text.Sizes.SIZE_16} marginless>
           Do you want to receive emails from {receiverName}?
@@ -105,8 +115,10 @@ const Donate = (props: DonateProps) => {
           className={styles.emailOptin}
           options={EMAIL_OPTIONS}
           value={wantsEmails}
-          onChange={value => updateDonation({ wantsEmails: value })}
+          onChange={updateWantsEmails}
         />
+
+        <ErrorAlert errors={commentErrors.amount} />
 
         <CurrencyInput
           name="amount"
@@ -118,7 +130,7 @@ const Donate = (props: DonateProps) => {
             </React.Fragment>
           }
           size={CurrencyInput.Sizes.LARGE}
-          onChange={amount => updateDonation({ amount })}
+          onChange={updateAmount}
           step={step}
           min={minimumDonation}
           max={maximumDonation}
@@ -129,11 +141,13 @@ const Donate = (props: DonateProps) => {
               className={styles.amountPreset}
               key={amountPreset}
               look={Button.Looks.OUTLINED}
-              onClick={() => updateDonation({ amount: amountPreset })}>
+              onClick={updateAmountPreset(amountPreset)}>
               ${amountPreset}
             </Button>
           ))}
         </div>
+
+        <ErrorAlert errors={commentErrors.comment} />
 
         <TextInput
           name="comment"
@@ -142,7 +156,7 @@ const Donate = (props: DonateProps) => {
           placeholder="Enter Comment Here"
           hint="Please refrain from offensive language or hurtful remarks. All donation comments are screened and will be removed from the website if deemed unacceptable."
           multiline
-          onChange={comment => updateDonation({ comment })}
+          onChange={updateComment}
           maxLength={5000}
           rows={5}
         />

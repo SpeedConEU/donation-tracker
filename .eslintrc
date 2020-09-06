@@ -16,7 +16,8 @@
   },
   "parser": "babel-eslint",
   "plugins": [
-    "react"
+    "react",
+    "react-hooks"
   ],
   "parserOptions": {
     "ecmaVersion": 6,
@@ -33,12 +34,22 @@
   },
   "rules": {
     "@typescript-eslint/camelcase": 0,
+    "@typescript-eslint/explicit-function-return-type": 0,
+    "eqeqeq": [
+      2,
+      "smart"
+    ],
     "no-array-constructor": 2,
     "no-bitwise": 2,
     "no-cond-assign": 2,
     "no-console": [
       2,
-      { "allow": ["warn", "error"] }
+      {
+        "allow": [
+          "warn",
+          "error"
+        ]
+      }
     ],
     "no-constant-condition": 2,
     "no-eval": 2,
@@ -54,30 +65,61 @@
         "varsIgnorePattern": "^React$|^_|^PropTypes$"
       }
     ],
-    "react/prop-types": 1,
-    "eqeqeq": [
+    "react/jsx-no-bind": [
       2,
-      "smart"
+      {
+        "ignoreDOMComponents": true,
+        "ignoreRefs": true
+      }
+    ],
+    "react/prop-types": 1,
+    "react-hooks/rules-of-hooks": "error",
+    "react-hooks/exhaustive-deps": [
+      "warn",
+      {
+        "additionalHooks": "useCachedCallback"
+      }
     ],
     "use-isnan": 2
   },
   "overrides": [
     {
-      "files": ["**/*.ts", "**/*.tsx"],
+      "files": [
+        "**/*.ts",
+        "**/*.tsx"
+      ],
       "parser": "@typescript-eslint/parser",
-      "plugins": ["@typescript-eslint"]
+      "plugins": [
+        "@typescript-eslint"
+      ]
     },
     {
-      "files": ["**/*Spec.ts", "**/*Spec.tsx", "**/*.spec.ts", "**/*.spec.tsx" ,"**/*Spec.js", "spec/**"],
+      "files": [
+        "**/*Spec.ts",
+        "**/*Spec.tsx",
+        "**/*.spec.ts",
+        "**/*.spec.tsx",
+        "**/*Spec.js",
+        "spec/**"
+      ],
       "env": {
         "jasmine": true
       },
       "rules": {
         "@typescript-eslint/ban-ts-ignore": 0,
         "@typescript-eslint/no-use-before-define": 0,
+        "@typescript-eslint/no-non-null-assertion": 0,
         "no-empty": 0,
         "no-unused-vars": 1,
         "react/no-find-dom-node": 0
+      }
+    },
+    {
+      "files": [
+        "babel.config.js"
+      ],
+      "env": {
+        "node": true
       }
     }
   ]

@@ -5,11 +5,11 @@ import pytz
 from django.conf import settings
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
-from django.core.urlresolvers import reverse
 from django.db import models
 from django.db.models import Sum, Q
 from django.db.models.signals import post_save, post_delete
 from django.dispatch import receiver
+from django.urls import reverse
 
 from tracker import util
 from tracker.models import Event, Donation, SpeedRun
@@ -141,6 +141,7 @@ class Prize(models.Model):
         USER_MODEL_NAME,
         null=True,
         help_text='User account responsible for prize shipping',
+        on_delete=models.PROTECT,
     )
     acceptemailsent = models.BooleanField(
         default=False, verbose_name='Accept/Deny Email Sent'
@@ -341,14 +342,14 @@ class Prize(models.Model):
                         'amount': d[1],
                         'weight': weight(self.minimumbid, self.maximumbid, d[1]),
                     }
-                    for d in list(donors.items())
+                    for d in donors.items()
                     if self.minimumbid <= d[1]
                 ],
                 key=lambda d: d['donor'],
             )
 
         else:
-            m = max(list(donors.items()), key=lambda d: d[1])
+            m = max(donors.items(), key=lambda d: d[1])
             return [{'donor': m[0].id, 'amount': m[1], 'weight': 1.0}]
 
     def is_donor_allowed_to_receive(self, donor):
@@ -436,11 +437,9 @@ class Prize(models.Model):
         return sum(
             [
                 x
-                for x in list(
-                    self.get_prize_winners()
-                    .aggregate(Sum('pendingcount'), Sum('acceptcount'))
-                    .values()
-                )
+                for x in self.get_prize_winners()
+                .aggregate(Sum('pendingcount'), Sum('acceptcount'))
+                .values()
                 if x is not None
             ]
         )
@@ -467,11 +466,7 @@ class Prize(models.Model):
 
     def get_prize_winner(self):
         if self.maxwinners == 1:
-            winners = self.get_prize_winners()
-            if len(winners) > 0:
-                return winners[0]
-            else:
-                return None
+            return self.get_prize_winners().first()
         else:
             raise Exception('Cannot get single winner for multi-winner prize')
 
@@ -695,6 +690,11 @@ class PrizeWinner(models.Model):
             'prize',
             'winner',
         )
+
+    @property
+    def donor_cache(self):
+        # accounts for people who mail-in entry and never donated
+        return self.winner.cache_for(self.prize.event_id) or self.winner
 
     def accept_deadline_date(self):
         """Return the actual calendar date associated with the accept deadline"""
