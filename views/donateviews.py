@@ -110,7 +110,8 @@ def process_form(request, event):
                             )
                     donation.full_clean()
                     donation.save()
-
+                if donation.event.paypalcurrency == 'CAD':
+                    donation.event.paypalcurrency = 'EUR'
                 paypal_dict = {
                     'amount': str(donation.amount),
                     'cmd': '_donations',
